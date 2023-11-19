@@ -24,7 +24,6 @@ common warnings
         DerivingStrategies,
         DerivingVia,
         LambdaCase,
-        OverloadedStrings,
         QuasiQuotes,
         RecordWildCards,
         ViewPatterns,
@@ -32,7 +31,7 @@ common warnings
 executable hxs
     import:           warnings
     main-is:          Main.hs
-    other-modules:    Configure, Build
+    other-modules:    Configure
     -- other-extensions:
     build-depends:    base >=4.18,
                       optparse-generic >= 1.5, optparse-applicative,
@@ -40,6 +39,7 @@ executable hxs
                       directory >= 1.3,
                       filepath >= 1.4.100,
                       aeson >= 2.2, yaml >= 0.11,
-                      bytestring
+                      bytestring,
+                      string-interpolate >= 0.3
     hs-source-dirs:   app
     default-language: GHC2021

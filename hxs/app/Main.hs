@@ -2,55 +2,64 @@ module Main where
 import Control.Exception
 import Data.Aeson
 import Options.Generic
-import System.Directory.OsPath
-import System.OsPath (osp, OsPath)
-import qualified Data.ByteString.Lazy as BSL
-import qualified System.OsPath as FP
+import System.Directory
 import Data.Maybe
-import Options.Applicative.Builder (InfoMod, progDesc)
+import qualified Data.ByteString.Lazy as BSL
+import Data.String.Interpolate
 
-import Configure
-import Build
+-- We are no longer configuring anything for now
+import Configure()
 
-type XCodeGenPath = Maybe OsPath <?> "Path to the xcodegen executable"
-type CabalPath    = Maybe OsPath <?> "Path to the cabal executable"
+import Development.Shake
+import Development.Shake.Command
+import Development.Shake.FilePath
+import Development.Shake.Util
 
-data Command w
-  = Init
-    { xcodegen ::w::: XCodeGenPath
-    , cabal    ::w::: CabalPath
-    }
-  | Build
-    { xcodegen ::w::: XCodeGenPath
-    , cabal    ::w::: CabalPath
-    , jobs     ::w::: Maybe Int <?> "Maximum number of rules to run in parallel (num threads)" <#> "j"
-    }
-
-infoMods :: InfoMod (Command Wrapped)
-infoMods = progDesc "hxs: Support tool for building projects using both Haskell and Swift"
+buildDir :: FilePath
+buildDir = "_build"
 
 main :: IO ()
 main = do
-  command <- unwrap <$> getRecordWith infoMods mempty
-  user_config <- getConfig
-  let config = applyToConfig user_config command
-  case command of
-    Init{}  -> initialize config
-    Build{} -> build config
+  projName <- takeBaseName <$> getCurrentDirectory
+  putStrLn $ [i|Working with #{projName}|]
+  shakeArgs shakeOptions{shakeFiles=buildDir} do
 
-applyToConfig :: Configuration -> Command Unwrapped -> Configuration
-applyToConfig config cmd =
-  config
-    { Configure.xcodegen = fromMaybe config.xcodegen cmd.xcodegen
-    , Configure.cabal    = fromMaybe config.cabal    cmd.cabal
-    , Configure.jobs     = case cmd of Build{jobs} -> fromMaybe config.jobs jobs; _ -> config.jobs
-    }
+    phony "clean" do
+      putInfo "Cleaning files in _build"
+      removeFilesAfter "_build" ["//*"]
 
---------------------------------------------------------------------------------
--- Instances
---------------------------------------------------------------------------------
+    phony "init" do
 
--- Command
-deriving stock    instance Generic (Command w)
-deriving anyclass instance ParseRecord (Command Wrapped)
+      need [ projName <.> "xcodeproj" </> "project.pbxproj"
+           , projName <.> "cabal"
+           ]
+
+    phony "build" do
+      need ["init"]
+      cmd_ "cabal" "build"
+      cmd_ "xcodebuild"
+      return ()
+
+    -- When initializing, we add the rules for generating project.yml 
+    projectYmlRule
+
+    xcprojRule projName
+
+
+projectYmlRule :: Rules ()
+projectYmlRule = do
+
+  "project.yml" %> \out -> do
+    cmd_ "touch" out
+
+
+xcprojRule :: String
+           -- ^ Project name
+           -> Rules ()
+xcprojRule projName = do
+
+  projName <.> "xcodeproj" </> "project.pbxproj" %> \out -> do
+    let spec = "project.yml"
+    need [spec]
+    cmd_ "xcodegen"
 
