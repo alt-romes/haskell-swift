@@ -8,10 +8,23 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified System.OsPath as FP
 import Data.Maybe
 
+import Development.Shake
+import Development.Shake.Command
+import Development.Shake.FilePath
+import Development.Shake.Util
+
 import Configure
 
 --------------------------------------------------------------------------------
--- Build
+-- Project generation
+--------------------------------------------------------------------------------
+
+initialize :: Configuration -> IO ()
+initialize Configuration{..} = shakeArgs shakeOptions{shakeFiles="_build", shakeThreads=jobs} do
+  return ()
+
+--------------------------------------------------------------------------------
+-- Building
 --------------------------------------------------------------------------------
 
 build :: Configuration -> IO ()

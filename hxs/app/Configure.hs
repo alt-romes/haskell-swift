@@ -17,6 +17,8 @@ data Configuration
   = Configuration
     { xcodegen :: OsPath
     , cabal    :: OsPath
+    , jobs     :: Int
+    -- ^ Maximum umber of threads to run in parallel
     }
 
 getConfig :: IO Configuration
@@ -25,7 +27,8 @@ getConfig = do
   createDirectoryIfMissing True configDir
 
   let configPath = configDir FP.</> [osp|config.json|]
-  hasConfig <- doesPathExist configPath
+  -- hasConfig <- doesPathExist configPath
+  let hasConfig = False -- for debugging
   legacyFP  <- FP.decodeUtf configPath
 
   if hasConfig
@@ -45,6 +48,7 @@ getConfig = do
                     `orThrow` ProgNotFound "xcodegen" "brew install xcodegen"
       cabal    <- findExecutable [osp|cabal|]
                     `orThrow` ProgNotFound "cabal" "get cabal via GHCup"
+      let jobs = 1
       return Configuration{..}
 
 orThrow :: Exception e => IO (Maybe a) -> e -> IO a

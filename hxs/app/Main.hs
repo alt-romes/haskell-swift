@@ -7,7 +7,7 @@ import System.OsPath (osp, OsPath)
 import qualified Data.ByteString.Lazy as BSL
 import qualified System.OsPath as FP
 import Data.Maybe
-import Options.Applicative.Builder (InfoMod, progDesc, briefDesc)
+import Options.Applicative.Builder (InfoMod, progDesc)
 
 import Configure
 import Build
@@ -23,6 +23,7 @@ data Command w
   | Build
     { xcodegen ::w::: XCodeGenPath
     , cabal    ::w::: CabalPath
+    , jobs     ::w::: Maybe Int <?> "Maximum number of rules to run in parallel (num threads)" <#> "j"
     }
 
 infoMods :: InfoMod (Command Wrapped)
@@ -32,22 +33,18 @@ main :: IO ()
 main = do
   command <- unwrap <$> getRecordWith infoMods mempty
   user_config <- getConfig
+  let config = applyToConfig user_config command
   case command of
-    Init{}  -> initialize
-    Build{} -> do
-      let config = applyToConfig user_config command
-      build config
-  where
-  applyToConfig :: Configuration -> Command Unwrapped -> Configuration
-  applyToConfig config cmd =
-    config
-      { Configure.xcodegen = fromMaybe config.xcodegen cmd.xcodegen
-      , Configure.cabal    = fromMaybe config.cabal    cmd.cabal
-      }
+    Init{}  -> initialize config
+    Build{} -> build config
 
-initialize :: IO ()
-initialize = putStrLn "Init is undefined"
-
+applyToConfig :: Configuration -> Command Unwrapped -> Configuration
+applyToConfig config cmd =
+  config
+    { Configure.xcodegen = fromMaybe config.xcodegen cmd.xcodegen
+    , Configure.cabal    = fromMaybe config.cabal    cmd.cabal
+    , Configure.jobs     = case cmd of Build{jobs} -> fromMaybe config.jobs jobs; _ -> config.jobs
+    }
 
 --------------------------------------------------------------------------------
 -- Instances
