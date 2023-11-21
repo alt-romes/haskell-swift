@@ -1,10 +1,6 @@
 module Main where
-import Control.Exception
-import Data.Aeson
 import Options.Generic
 import System.Directory
-import Data.Maybe
-import qualified Data.ByteString.Lazy as BSL
 import Data.String.Interpolate
 import Options.Applicative.Builder (InfoMod, progDesc)
 
@@ -12,9 +8,7 @@ import Options.Applicative.Builder (InfoMod, progDesc)
 import Configure()
 
 import Development.Shake
-import Development.Shake.Command
 import Development.Shake.FilePath
-import Development.Shake.Util
 
 import Common
 import Init
@@ -33,16 +27,18 @@ main = do
   cmd'       <- getRecordWith infoMods mempty
   projectDir <- maybe getCurrentDirectory pure cmd'.root
   let projName = takeBaseName projectDir
+  let buildDir = projectDir </> shakeBuildDir
   case cmd' of
     Init{} -> do
-      contents <- System.Directory.getDirectoryContents projectDir
-      if null contents
-        then do
-          putStrLn [i|Creating a new project "#{projName}"...|]
-          initialize projectDir projName
-          putStrLn "Done!"
-        else
-          putStrLn "The directory in which 'hxs init' is run must have no contents."
+      initialize projectDir projName
+      -- contents <- System.Directory.getDirectoryContents projectDir
+      -- if null $ drop 2 contents
+      --   then do
+      --     putStrLn [i|Creating a new project "#{projName}"...|]
+      --     initialize projectDir projName
+      --     putStrLn "Done!"
+      --   else
+      --     putStrLn "The directory in which 'hxs init' is run must have no contents."
     Build{} -> do
       putStrLn [i|Building #{projName}|]
       build projectDir projName
@@ -50,13 +46,13 @@ main = do
       want ["clean"]
       phony "clean" do
         putInfo "Deleting files in _build"
-        removeFilesAfter (projectDir </> "_build") ["//*"]
+        removeFilesAfter buildDir ["//*"]
     Nuke{} -> shake' do
       want ["clean"]
       phony "clean" do
         putInfo "Deleting files in _build"
-        removeFilesAfter (projectDir </> "_build") ["//*"]
-        removeFilesAfter projectDir ["project.yml", "BuildSettings", projName <.> "xcodeproj", "dist-newstyle"]
+        removeFilesAfter buildDir ["//*"]
+        removeFilesAfter projectDir ["project.yml", xcConfigsDir, projName <.> "xcodeproj", "dist-newstyle"]
 
 
 --------------------------------------------------------------------------------

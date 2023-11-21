@@ -7,8 +7,8 @@ import Development.Shake
 --------------------------------------------------------------------------------
 
 shake' :: Rules () -> IO ()
-shake' = shake shakeOptions{shakeFiles=buildDir, shakeVerbosity=Verbose}
+shake' = shake shakeOptions{shakeFiles=shakeBuildDir, shakeVerbosity=Verbose}
 
-buildDir :: FilePath
-buildDir = "_build"
+shakeBuildDir :: FilePath
+shakeBuildDir = "build"
 
