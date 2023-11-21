@@ -11,29 +11,49 @@ import Data.Aeson.Key (fromString)
 import GHC.Generics
 import Data.Function
 import qualified Data.Text as T
+import Data.String.Interpolate
+import Data.Text (Text)
+import qualified Data.Text.IO as T
 
 --------------------------------------------------------------------------------
 -- Initialize
 --------------------------------------------------------------------------------
 
-initialize :: String -> IO ()
-initialize projName = shake' do
+initialize :: FilePath -> String -> IO ()
+initialize projDir projName = shake' do
 
-  want [ "project.yml"
+  want $ map (projDir </>)
+       [ "project.yml"
        , projName <.> "cabal"
-       , defaultStaticXCConfig
+       , defaultStaticXCConfigFile
        ]
 
-  projectYmlRule projName
+  projDir </> "project.yml" %> \out -> do
+    putInfo "Writing project.yml with the default project"
+    encodeFile out (defaultProject projName) & liftIO
+    trackWrite [out]
+
+  projDir </> defaultStaticXCConfigFile %> \out -> do
+    putInfo [i|Writing #{out} with the default static .xcconfig settings|]
+    T.writeFile out staticXCConfig & liftIO
+    trackWrite [out]
+
+--------------------------------------------------------------------------------
+-- Static .xcconfig config
+--------------------------------------------------------------------------------
+
+xcConfigsDir, defaultStaticXCConfigFile :: FilePath
+xcConfigsDir = "BuildSettings"
+defaultStaticXCConfigFile = xcConfigsDir </> "Static.xcconfig"
+
+staticXCConfig :: Text
+staticXCConfig = [__i|
+    SWIFT_INCLUDE_PATHS=$(PROJECT_DIR)
+|]
 
 --------------------------------------------------------------------------------
 -- project.yml
 --------------------------------------------------------------------------------
-
-projectYmlRule :: String -> Rules ()
-projectYmlRule projName =
-  "project.yml" %> \out -> do
-    encodeFile out (defaultProject projName) & liftIO
 
 defaultProject :: String -> Project
 defaultProject projName = Project
@@ -55,8 +75,8 @@ defaultProjectOptions = ProjectOptions
 
 defaultConfigFiles :: ConfigFiles
 defaultConfigFiles = ConfigFiles
-    { debug = defaultStaticXCConfig
-    , release = defaultStaticXCConfig
+    { debug   = defaultStaticXCConfigFile
+    , release = defaultStaticXCConfigFile
     }
 
 defaultTargets :: String -> KeyMap Target
@@ -67,7 +87,7 @@ defaultTargets projName =
 
 defaultMacOSTarget :: Target
 defaultMacOSTarget = Target
-    { _type = "application"
+    { type' = "application"
     , platform = MACOS
     , configFiles = Nothing
     , sources = []
@@ -125,7 +145,7 @@ data ConfigFiles
 
 data Target
     = Target
-    { _type :: ProductType
+    { type' :: ProductType
     , platform :: Platform
     , configFiles :: Maybe ConfigFiles
     , sources :: [TargetSource]
@@ -194,6 +214,19 @@ newtype TargetScheme
     { configVariants :: [String]
     }
 
+instance ToJSON ConfigFiles where
+    toJSON ConfigFiles{..} = object
+        [ fromString "Debug"   .= toJSON debug
+        , fromString "Release" .= toJSON release ]
+
+instance ToJSON Target where
+    toJSON Target{..} = object
+        [ fromString "type"        .= toJSON type'
+        , fromString "platform"    .= toJSON platform
+        , fromString "configFiles" .= toJSON configFiles
+        , fromString "sources"     .= toJSON sources
+        , fromString "scheme"      .= toJSON scheme ]
+
 instance ToJSON Platform where
     toJSON = \case
       IOS      -> String $ T.pack "iOS"
@@ -228,10 +261,6 @@ deriving stock    instance Generic Project
 deriving anyclass instance ToJSON  Project
 deriving stock    instance Generic ProjectOptions
 deriving anyclass instance ToJSON  ProjectOptions
-deriving stock    instance Generic ConfigFiles
-deriving anyclass instance ToJSON  ConfigFiles
-deriving stock    instance Generic Target
-deriving anyclass instance ToJSON  Target
 deriving stock    instance Generic SwiftPackage
 deriving anyclass instance ToJSON  SwiftPackage
 deriving stock    instance Generic TargetSource

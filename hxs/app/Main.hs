@@ -23,34 +23,48 @@ infoMods :: InfoMod Command
 infoMods = progDesc "hxs: Support tool for building projects using both Haskell and Swift"
 
 data Command
-  = Init
-  | Build
-  | Clean
+  = Init  { root :: Maybe FilePath }
+  | Build { root :: Maybe FilePath }
+  | Clean { root :: Maybe FilePath }
+  | Nuke  { root :: Maybe FilePath }
 
 main :: IO ()
 main = do
-  cmd' <- getRecordWith infoMods mempty
-  projName <- takeBaseName <$> getCurrentDirectory
+  cmd'       <- getRecordWith infoMods mempty
+  projectDir <- maybe getCurrentDirectory pure cmd'.root
+  let projName = takeBaseName projectDir
   case cmd' of
-    Init -> do
-      putStrLn [i|Initializing #{projName}|]
-      initialize projName
-    Build -> do
+    Init{} -> do
+      contents <- System.Directory.getDirectoryContents projectDir
+      if null contents
+        then do
+          putStrLn [i|Creating a new project "#{projName}"...|]
+          initialize projectDir projName
+          putStrLn "Done!"
+        else
+          putStrLn "The directory in which 'hxs init' is run must have no contents."
+    Build{} -> do
       putStrLn [i|Building #{projName}|]
-      build projName
-    Clean -> shake' do
+      build projectDir projName
+    Clean{} -> shake' do
       want ["clean"]
       phony "clean" do
         putInfo "Deleting files in _build"
-        removeFilesAfter "_build" ["//*"]
+        removeFilesAfter (projectDir </> "_build") ["//*"]
+    Nuke{} -> shake' do
+      want ["clean"]
+      phony "clean" do
+        putInfo "Deleting files in _build"
+        removeFilesAfter (projectDir </> "_build") ["//*"]
+        removeFilesAfter projectDir ["project.yml", "BuildSettings", projName <.> "xcodeproj", "dist-newstyle"]
 
 
 --------------------------------------------------------------------------------
 -- Build
 --------------------------------------------------------------------------------
 
-build :: String -> IO ()
-build projName = shake' do
+build :: FilePath -> String -> IO ()
+build projDir projName = shake' do
 
   xcprojRule projName
 
