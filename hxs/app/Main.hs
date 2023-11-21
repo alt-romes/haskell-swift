@@ -6,6 +6,7 @@ import System.Directory
 import Data.Maybe
 import qualified Data.ByteString.Lazy as BSL
 import Data.String.Interpolate
+import Options.Applicative.Builder (InfoMod, progDesc)
 
 -- We are no longer configuring anything for now
 import Configure()
@@ -15,51 +16,63 @@ import Development.Shake.Command
 import Development.Shake.FilePath
 import Development.Shake.Util
 
-buildDir :: FilePath
-buildDir = "_build"
+import Common
+import Init
+
+infoMods :: InfoMod Command
+infoMods = progDesc "hxs: Support tool for building projects using both Haskell and Swift"
+
+data Command
+  = Init
+  | Build
+  | Clean
 
 main :: IO ()
 main = do
+  cmd' <- getRecordWith infoMods mempty
   projName <- takeBaseName <$> getCurrentDirectory
-  putStrLn $ [i|Working with #{projName}|]
-  shakeArgs shakeOptions{shakeFiles=buildDir} do
-
-    phony "clean" do
-      putInfo "Cleaning files in _build"
-      removeFilesAfter "_build" ["//*"]
-
-    phony "init" do
-
-      need [ projName <.> "xcodeproj" </> "project.pbxproj"
-           , projName <.> "cabal"
-           ]
-
-    phony "build" do
-      need ["init"]
-      cmd_ "cabal" "build"
-      cmd_ "xcodebuild"
-      return ()
-
-    -- When initializing, we add the rules for generating project.yml 
-    projectYmlRule
-
-    xcprojRule projName
+  case cmd' of
+    Init -> do
+      putStrLn [i|Initializing #{projName}|]
+      initialize projName
+    Build -> do
+      putStrLn [i|Building #{projName}|]
+      build projName
+    Clean -> shake' do
+      want ["clean"]
+      phony "clean" do
+        putInfo "Deleting files in _build"
+        removeFilesAfter "_build" ["//*"]
 
 
-projectYmlRule :: Rules ()
-projectYmlRule = do
+--------------------------------------------------------------------------------
+-- Build
+--------------------------------------------------------------------------------
 
-  "project.yml" %> \out -> do
-    cmd_ "touch" out
+build :: String -> IO ()
+build projName = shake' do
 
+  xcprojRule projName
+
+  -- cmd_ "cabal" "build"
+  -- cmd_ "xcodebuild"
+  -- return ()
 
 xcprojRule :: String
            -- ^ Project name
            -> Rules ()
 xcprojRule projName = do
 
+  want [ projName <.> "xcodeproj" </> "project.pbxproj" ]
+
   projName <.> "xcodeproj" </> "project.pbxproj" %> \out -> do
     let spec = "project.yml"
     need [spec]
     cmd_ "xcodegen"
 
+--------------------------------------------------------------------------------
+-- Utils and Instances
+--------------------------------------------------------------------------------
+
+deriving instance Generic Command
+deriving anyclass instance ParseRecord Command
