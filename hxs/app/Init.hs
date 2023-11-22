@@ -22,6 +22,8 @@ initialize projDir projName = shake' do
   want $ map (projDir </>)
        [ projName <.> "xcodeproj" </> "project.pbxproj"
 
+       , "module.modulemap"
+
        , defaultDebugXCConfigFile
        , defaultReleaseXCConfigFile
 
@@ -31,6 +33,7 @@ initialize projDir projName = shake' do
        , ".gitignore"
        ]
 
+  -- xcode
   "//*.xcodeproj" </> "project.pbxproj" %> \out -> do
     b <- doesFileExist out
     unless b $ throwIO (NoInitXCodeProj out) & liftIO
@@ -39,11 +42,17 @@ initialize projDir projName = shake' do
 --     -- TODO: Patch XML
 --     _
 
+  -- module.modulemap
+  projDir </> "module.modulemap" %> \out -> do
+    writeFile' out (defaultModuleMap projName)
+
+  -- .xcconfig
   projDir </> xcConfigsDir </> "*.xcconfig" %> \out -> do
     putInfo [i|Writing #{out} with the default static .xcconfig settings|]
     T.writeFile out staticXCConfig & liftIO
     trackWrite [out]
 
+  -- Cabal
   projDir </> projName <.> "cabal" %> \out -> do
     putInfo "Creating a cabal project"
     -- See Note [cabal init <projDir>]
@@ -54,6 +63,7 @@ initialize projDir projName = shake' do
   projDir </> "flib" </> "MyForeignLib.hs" %> \out -> do
     writeFile' out stubMyForeignLib
 
+  -- .gitignore
   "//.gitignore" %> \out ->
     writeFile' out [__i'E|
         #{shakeBuildDir}
@@ -64,14 +74,17 @@ initialize projDir projName = shake' do
 -- Static .xcconfig config
 --------------------------------------------------------------------------------
 
-xcConfigsDir, defaultDebugXCConfigFile, defaultReleaseXCConfigFile :: FilePath
+xcConfigsDir, defaultDebugXCConfigFile, defaultReleaseXCConfigFile, dynamicXCConfigFile :: FilePath
 xcConfigsDir = "configs"
 defaultDebugXCConfigFile = xcConfigsDir </> "Debug.xcconfig"
 defaultReleaseXCConfigFile = xcConfigsDir </> "Release.xcconfig"
+dynamicXCConfigFile = shakeBuildDir </> xcConfigsDir </> "Dynamic.xcconfig"
 
 staticXCConfig :: Text
+-- We don't do OTHER_LDFLAGS=-lhaskell-foreign-framework because we expect the `link` directive in the module map to have the same effect.
 staticXCConfig = [__i|
     SWIFT_INCLUDE_PATHS=$(PROJECT_DIR)
+    \#include "../#{dynamicXCConfigFile}"
 |]
 
 --------------------------------------------------------------------------------
@@ -133,12 +146,27 @@ stubMyForeignLib = [__i'E|
     module MyForeignLib where
     import Foreign.C
 
-    foreign export ccall hs_double :: CInt -> CInt
+    foreign export ccall hs_factorial :: CInt -> CInt
 
-    hs_double :: CInt -> CInt
-    hs_double x = 2 * x
+    hs_factorial :: CInt -> CInt
+    hs_factorial x = product [1..x]
 |]
 
+--------------------------------------------------------------------------------
+-- module.modulemap
+--------------------------------------------------------------------------------
+defaultModuleMap :: String -> String
+defaultModuleMap projName = [__i'E|
+        module #{projName} {
+            umbrella "#{foreignIncludeDir}"
+
+            explicit module * {
+                export *
+            }
+
+            link "#{projName}-foreign"
+        }
+    |]
 --------------------------------------------------------------------------------
 -- Exceptions
 --------------------------------------------------------------------------------
