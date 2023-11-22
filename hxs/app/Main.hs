@@ -11,7 +11,8 @@ import Development.Shake
 import Development.Shake.FilePath
 
 import Common
-import Init
+import Init  ( initialize )
+import Build ( build )
 
 infoMods :: InfoMod Command
 infoMods = progDesc "hxs: Support tool for building projects using both Haskell and Swift"
@@ -47,31 +48,6 @@ main = do
         putInfo "Deleting files in _build"
         removeFilesAfter buildDir ["//*"]
 
-
---------------------------------------------------------------------------------
--- Build
---------------------------------------------------------------------------------
-
-build :: FilePath -> String -> IO ()
-build projDir projName = shake' do
-
-  xcprojRule projName
-
-  -- cmd_ "cabal" "build"
-  -- cmd_ "xcodebuild"
-  -- return ()
-
-xcprojRule :: String
-           -- ^ Project name
-           -> Rules ()
-xcprojRule projName = do
-
-  want [ projName <.> "xcodeproj" </> "project.pbxproj" ]
-
-  projName <.> "xcodeproj" </> "project.pbxproj" %> \out -> do
-    let spec = "project.yml"
-    need [spec]
-    cmd_ "xcodegen"
 
 --------------------------------------------------------------------------------
 -- Utils and Instances

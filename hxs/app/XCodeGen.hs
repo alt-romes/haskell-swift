@@ -5,7 +5,7 @@ import Data.Aeson.Key (fromString)
 import GHC.Generics
 
 -- We can only do this now because Init no longer uses XCodeGen
-import Init
+import Common
     ( xcConfigsDir,
       defaultDebugXCConfigFile,
       defaultReleaseXCConfigFile )

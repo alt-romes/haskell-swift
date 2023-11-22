@@ -31,7 +31,7 @@ common warnings
 executable hxs
     import:           warnings
     main-is:          Main.hs
-    other-modules:    Configure, XCodeGen, Init, Common
+    other-modules:    Configure, XCodeGen, Init, Build, Common
     -- other-extensions:
     build-depends:    base >=4.18,
                       optparse-generic >= 1.5.2, optparse-applicative,
