@@ -20,7 +20,6 @@ data Command
   = Init  { root :: Maybe FilePath }
   | Build { root :: Maybe FilePath }
   | Clean { root :: Maybe FilePath }
-  | Nuke  { root :: Maybe FilePath }
 
 main :: IO ()
 main = do
@@ -47,12 +46,6 @@ main = do
       phony "clean" do
         putInfo "Deleting files in _build"
         removeFilesAfter buildDir ["//*"]
-    Nuke{} -> shake' do
-      want ["clean"]
-      phony "clean" do
-        putInfo "Deleting files in _build"
-        removeFilesAfter buildDir ["//*"]
-        removeFilesAfter projectDir ["project.yml", xcConfigsDir, projName <.> "xcodeproj", "dist-newstyle"]
 
 
 --------------------------------------------------------------------------------
