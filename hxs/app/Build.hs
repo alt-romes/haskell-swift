@@ -13,8 +13,7 @@ build :: FilePath -> String -> IO ()
 build projDir projName = shake' do
 
   want $ map (projDir </>)
-       [ projName <.> "xcodeproj" </> "project.pbxproj"
-       , dynamicXCConfigFile
+       [ dynamicXCConfigFile
        ]
 
   projDir </> dynamicXCConfigFile %> \out -> do

@@ -40,9 +40,11 @@ initialize projDir projName = shake' do
   "//*.xcodeproj" </> "project.pbxproj" %> createOnly \out -> do
     throwIO (NoInitXCodeProj out) & liftIO
 
---   projDir </> projName <.> "xcodeproj" </> ".hxs-stamp" %> createOnly \out -> do
---     -- TODO: Patch XML
---     _
+  -- xcode: Patch XML
+  projDir </> projName <.> "xcodeproj" </> ".hxs-stamp" %> createOnly \out -> do
+    let xcprojPath = takeDirectory out </> "project.pbxproj"
+    xcproj <- readFile' xcprojPath
+    _
 
   -- module.modulemap
   projDir </> "module.modulemap" %> createOnly \out -> do
@@ -182,27 +184,27 @@ stubMyForeignLibRtsH = [__i'E|
 
 stubMyForeignLibRtsC :: String
 stubMyForeignLibRtsC = [__i'E|
-      \#include <stdlib.h>
-      \#include <stdio.h>
-      \#include <HsFFI.h>
+    \#include <stdlib.h>
+    \#include <stdio.h>
+    \#include <HsFFI.h>
 
-      HsBool flib_init() {
+    HsBool flib_init() {
 
-          printf("Initialising flib\n");
+        printf("Initialising flib\n");
 
-          // Initialise Haskell runtime
-          hs_init(NULL, NULL);
+        // Initialise Haskell runtime
+        hs_init(NULL, NULL);
 
-          // Do other library initialisations here
+        // Do other library initialisations here
 
-          return HS_BOOL_TRUE;
-      }
+        return HS_BOOL_TRUE;
+    }
 
-      void flib_end() {
-          printf("Terminating flib\n");
-          hs_exit();
-      }
-  |]
+    void flib_end() {
+        printf("Terminating flib\n");
+        hs_exit();
+    }
+|]
 
 --------------------------------------------------------------------------------
 -- module.modulemap

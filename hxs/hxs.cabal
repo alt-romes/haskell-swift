@@ -40,6 +40,6 @@ executable hxs
                       filepath >= 1.4.100,
                       aeson >= 2.2, yaml >= 0.11,
                       bytestring, text,
-                      string-interpolate >= 0.3
+                      string-interpolate >= 0.3,
     hs-source-dirs:   app
     default-language: GHC2021
