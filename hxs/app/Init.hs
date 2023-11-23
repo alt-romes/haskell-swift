@@ -12,6 +12,7 @@ import qualified Data.Text.IO as T
 import qualified Data.List as S
 import Control.Exception
 import Control.Monad
+import System.Exit (ExitCode(..))
 
 --------------------------------------------------------------------------------
 -- Initialize
@@ -22,6 +23,7 @@ initialize projDir projName = shake' do
 
   want $ map (projDir </>)
        [ projName <.> "xcodeproj" </> "project.pbxproj"
+       , projName <.> "xcodeproj" </> ".hxs-stamp.rb"
 
        , "module.modulemap"
 
@@ -40,11 +42,18 @@ initialize projDir projName = shake' do
   "//*.xcodeproj" </> "project.pbxproj" %> createOnly \out -> do
     throwIO (NoInitXCodeProj out) & liftIO
 
-  -- xcode: Patch XML
-  projDir </> projName <.> "xcodeproj" </> ".hxs-stamp" %> createOnly \out -> do
-    let xcprojPath = takeDirectory out </> "project.pbxproj"
-    xcproj <- readFile' xcprojPath
-    _
+  -- xcode: Patch .xcodeproj
+  -- We use a stamp file (that is the ruby script) to mark that we've adapted the project file already.
+  projDir </> projName <.> "xcodeproj" </> ".hxs-stamp.rb" %> createOnly \out -> do
+    writeFile' out (adaptXCProjRubyScript (takeDirectory out))
+    Exit exitCode <- cmd "ruby" out -- execute ruby script
+    case exitCode of
+      ExitSuccess
+        -> putInfo "Successfully adjusted .xcodeproj using the ruby script"
+      _ -> do
+        -- Running the script failed. We delete the script so that we try again later.
+        removeFiles "." [out] & liftIO
+        throwIO FailXCodeProjEdit & liftIO
 
   -- module.modulemap
   projDir </> "module.modulemap" %> createOnly \out -> do
@@ -207,8 +216,26 @@ stubMyForeignLibRtsC = [__i'E|
 |]
 
 --------------------------------------------------------------------------------
+-- Ruby script to adapt the default .xcodeproj
+--------------------------------------------------------------------------------
+
+adaptXCProjRubyScript :: String -> String
+adaptXCProjRubyScript xcodeprojPathRelativeToRunner = [__i'E|
+  require 'xcodeproj'
+  project_path = '#{xcodeprojPathRelativeToRunner}'
+  project = Xcodeproj::Project.open(project_path)
+
+  project.build_configurations.each do |config|
+    config.base_configuration_reference ||= project.new_file("#{xcConfigsDir}/\#{config.name}.xcconfig")
+  end
+
+  project.save
+|]
+
+--------------------------------------------------------------------------------
 -- module.modulemap
 --------------------------------------------------------------------------------
+
 defaultModuleMap :: String -> String
 defaultModuleMap projName = [__i'E|
         module #{projName} {
@@ -225,12 +252,14 @@ defaultModuleMap projName = [__i'E|
             link "#{projName}-foreign"
         }
     |]
+
 --------------------------------------------------------------------------------
 -- Exceptions
 --------------------------------------------------------------------------------
 
-newtype InitExceptions
+data InitExceptions
     = NoInitXCodeProj FilePath
+    | FailXCodeProjEdit
 
 instance Exception InitExceptions
 instance Show InitExceptions where
@@ -239,4 +268,14 @@ instance Show InitExceptions where
         Initializing XCode projects (.xcodeproj) programatically is not supported (by Apple, in general).
         Please create an XCode project manually, where the name matches the project root dir name
         (i.e. the project file must be #{out}).
+    |]
+
+    show FailXCodeProjEdit
+      = [__i'E|
+      Editing the .xcodeproj programmatically via the ruby script using the `xcodeproj` library failed.
+      This is likely because the `xcodeproj` ruby library is not installed in your system. You can get it with:
+      
+      gem install xcodeproj
+
+      It is unlikely, but the error might have also been caused by the (lack of) a ruby installation.
     |]
