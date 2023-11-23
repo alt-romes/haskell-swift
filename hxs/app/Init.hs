@@ -45,7 +45,8 @@ initialize projDir projName = shake' do
   -- xcode: Patch .xcodeproj
   -- We use a stamp file (that is the ruby script) to mark that we've adapted the project file already.
   projDir </> projName <.> "xcodeproj" </> ".hxs-stamp.rb" %> createOnly \out -> do
-    writeFile' out (adaptXCProjRubyScript (takeDirectory out))
+    flib_path <- cabalForeignLibPath projDir projName
+    writeFile' out (adaptXCProjRubyScript (takeDirectory out) flib_path)
     Exit exitCode <- cmd "ruby" out -- execute ruby script
     case exitCode of
       ExitSuccess
@@ -219,14 +220,24 @@ stubMyForeignLibRtsC = [__i'E|
 -- Ruby script to adapt the default .xcodeproj
 --------------------------------------------------------------------------------
 
-adaptXCProjRubyScript :: String -> String
-adaptXCProjRubyScript xcodeprojPathRelativeToRunner = [__i'E|
+adaptXCProjRubyScript :: FilePath -> FilePath -> String
+adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = [__i'E|
   require 'xcodeproj'
   project_path = '#{xcodeprojPathRelativeToRunner}'
   project = Xcodeproj::Project.open(project_path)
 
+  \# Set `.xcconfig` files as configurations for Debug and Release
   project.build_configurations.each do |config|
     config.base_configuration_reference ||= project.new_file("#{xcConfigsDir}/\#{config.name}.xcconfig")
+  end
+
+  \# Add Copy Files build phase to copy the haskell foreign library to Frameworks
+  project.native_targets.each do |tgt|
+    lib_file = project.new_file('#{haskellFLibRelativeToProj}')
+    copy_files_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
+    copy_files_phase.symbol_dst_subfolder_spec = :frameworks
+    copy_files_phase.add_file_reference(lib_file)
+    tgt.build_phases << copy_files_phase
   end
 
   project.save

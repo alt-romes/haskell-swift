@@ -2,6 +2,7 @@ module Common where
 
 import System.FilePath
 import Development.Shake
+import Data.String.Interpolate
 
 --------------------------------------------------------------------------------
 -- Shake
@@ -19,6 +20,12 @@ shakeBuildDir = "build"
 
 foreignIncludeDir :: FilePath
 foreignIncludeDir = shakeBuildDir </> "include"
+
+-- | Returns the path to the cabal-built Haskell shared library, relative to the project dir
+cabalForeignLibPath :: FilePath -> String -> Action FilePath
+cabalForeignLibPath projDir projName = do
+    Stdout flib_path <- cmd "cabal list-bin" [[i|--project-dir=#{projDir}|], [i|#{projName}-foreign|] :: String]
+    return $ makeRelative projDir flib_path
 
 --------------------------------------------------------------------------------
 -- .xcconfig
