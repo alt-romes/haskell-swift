@@ -24,6 +24,7 @@ initialize projDir projName = shake' do
   want $ map (projDir </>)
        [ projName <.> "xcodeproj" </> "project.pbxproj"
        , projName <.> "xcodeproj" </> ".hxs-stamp.rb"
+       , projName <.> "xcodeproj" </> ".hxs-stamp.swift"
 
        , "module.modulemap"
 
@@ -55,6 +56,19 @@ initialize projDir projName = shake' do
         -- Running the script failed. We delete the script so that we try again later.
         removeFiles "." [out] & liftIO
         throwIO FailXCodeProjEdit & liftIO
+
+  -- swift: Patch main
+  projDir </> projName <.> "xcodeproj" </> ".hxs-stamp.swift" %> createOnly \out -> do
+    let appMainPath = projDir </> projName </> [i|#{projName}App.swift|]
+    appMain <- readFile' appMainPath
+    let adjustedMain = concatMap (injectSwiftMainApp projName) (lines appMain) & unlines
+    writeFile' appMainPath adjustedMain
+    writeFile' out $ unlines
+      [ [i|// #{projName}App.swift|]
+      , defaultRTSImport projName
+      , defaultRTSInitApp
+      ]
+    putInfo "Successfully adjusted the App entry point to initialize the Haskell runtime system."
 
   -- module.modulemap
   projDir </> "module.modulemap" %> createOnly \out -> do
@@ -245,6 +259,40 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
 
   project.save
 |]
+
+--------------------------------------------------------------------------------
+-- Injecting code into Swift Main App
+--------------------------------------------------------------------------------
+
+defaultRTSImport :: String -> String
+defaultRTSImport projName = [i|import #{projName}HS.RTSManage|]
+
+defaultRTSInitApp :: String
+defaultRTSInitApp = [i|
+    init() {
+        flib_init()
+
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            // terminating
+            flib_end()
+        }
+    }
+|]
+
+injectSwiftMainApp :: String -> String -> [String]
+injectSwiftMainApp projName line
+  = if | "import" `S.isInfixOf` line
+       -> [ defaultRTSImport projName
+          , line
+          ]
+       | [i|struct #{projName}App: App|] `S.isInfixOf` line
+       -> [ line
+          , defaultRTSInitApp
+          ]
+       | otherwise
+       -> [ line ]
+
+
 
 --------------------------------------------------------------------------------
 -- module.modulemap

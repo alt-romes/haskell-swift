@@ -27,6 +27,7 @@ common warnings
         QuasiQuotes,
         RecordWildCards,
         ViewPatterns,
+        MultiWayIf
 
 executable hxs
     import:           warnings
