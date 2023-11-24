@@ -26,7 +26,7 @@ main :: IO ()
 main = do
   cmd'       <- getRecordWith infoMods mempty
   projectDir <- maybe getCurrentDirectory pure cmd'.root
-  let projName = takeBaseName projectDir
+  let projName = takeBaseName (dropTrailingPathSeparator projectDir)
   let buildDir = projectDir </> shakeBuildDir
   case cmd' of
     Init{} -> do
