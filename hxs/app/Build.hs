@@ -15,8 +15,7 @@ build projDir projName = shake' projDir do
 
   flib <- cabalForeignLibPath projDir projName
 
-  want $ map (projDir </>)
-       [ dynamicXCConfigFile
+  want [ projDir </> dynamicXCConfigFile
        , flib
        ]
 
@@ -26,21 +25,20 @@ build projDir projName = shake' projDir do
     -- machine) since this is done at build time into dirs that are not checked
     -- into source control, not at init time.
     Stdout (words -> [_ffi_headers, rts_headers]) <- cmd "ghc-pkg field rts include-dirs --simple-output"
-    flib_path <- cabalForeignLibPath projDir projName
     writeFile' out [__i'E|
         HEADER_SEARCH_PATHS=$(inherit) #{rts_headers}
-        LIBRARY_SEARCH_PATHS=$(inherit) #{takeDirectory flib_path}
+        LIBRARY_SEARCH_PATHS=$(inherit) #{takeDirectory flib}
     |]
 
   -- The shared library doubles as a stamp for everything else cabal builds e.g. the headers
-  flib %> \out -> do
-    cmd_ ([i|cabal build --project-dir=#{projDir}|] :: String)
+  flib %> \_out -> do
+    cmd_ ([i|cabal build --project-dir=#{projDir} #{projName}-foreign|] :: String)
 
     -- Then copy all include-stubs//*_stubs.h to include//*.h
     stubs <- getDirectoryFiles (projDir </> foreignIncludeStubsDir) ["//*_stub.h"]
     _ <- forP stubs \stub -> do -- in parallel!
-      let header_name = reverse $ drop (length "_stub.h") $ reverse (takeFileName out)
-      copyFileChanged stub (projDir </> foreignIncludeDir </> header_name <.> "h")
+      let header_name = reverse $ drop (length "_stub.h") $ reverse (takeFileName stub)
+      copyFileChanged (projDir </> foreignIncludeStubsDir </> stub) (projDir </> foreignIncludeDir </> header_name <.> "h")
 
     return ()
 
