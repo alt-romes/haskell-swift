@@ -34,13 +34,14 @@ executable hxs
     main-is:          Main.hs
     other-modules:    Configure, XCodeGen, Init, Build, Common
     -- other-extensions:
+    ghc-options:      -threaded
     build-depends:    base >=4.18,
                       optparse-generic >= 1.5.2, optparse-applicative,
                       shake >= 0.19,
                       directory >= 1.3,
                       filepath >= 1.4.100,
                       aeson >= 2.2, yaml >= 0.11,
-                      bytestring, text,
+                      bytestring, text, process,
                       string-interpolate >= 0.3,
     hs-source-dirs:   app
     default-language: GHC2021

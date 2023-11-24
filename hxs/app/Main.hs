@@ -47,7 +47,7 @@ main = do
     Build{} -> do
       putStrLn [i|Building #{projName}|]
       build projectDir projName
-    Clean{} -> shake' do
+    Clean{} -> shake' projectDir do
       want ["clean"]
       phony "clean" do
         putInfo "Deleting files in _build"

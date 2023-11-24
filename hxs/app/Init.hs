@@ -19,7 +19,7 @@ import System.Exit (ExitCode(..))
 --------------------------------------------------------------------------------
 
 initialize :: FilePath -> String -> IO ()
-initialize projDir projName = shake' do
+initialize projDir projName = shake' projDir do
 
   want $ map (projDir </>)
        [ projName <.> "xcodeproj" </> "project.pbxproj"
@@ -174,8 +174,8 @@ foreign-library #{projName}-foreign
     -- We copy the C stub headers to a folder in the root.
     -- If you have foreign-export declarations in the library
     -- be sure to add this flag there too (so all stubs get added
-    -- to #{foreignIncludeDir}).
-    ghc-options: -stubdir=#{foreignIncludeDir}
+    -- to #{foreignIncludeStubsDir}).
+    ghc-options: -stubdir=#{foreignIncludeStubsDir}
 
     other-modules: MyForeignLib
     hs-source-dirs: flib

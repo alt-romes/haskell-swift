@@ -1,5 +1,8 @@
 module Common where
 
+import System.Process
+import Data.Function
+import Control.Monad.IO.Class
 import System.FilePath
 import Development.Shake
 import Data.String.Interpolate
@@ -8,8 +11,8 @@ import Data.String.Interpolate
 -- Shake
 --------------------------------------------------------------------------------
 
-shake' :: Rules () -> IO ()
-shake' = shake shakeOptions{shakeFiles=shakeBuildDir, shakeVerbosity=Verbose}
+shake' :: FilePath -> Rules () -> IO ()
+shake' projDir = shake shakeOptions{shakeFiles=projDir </> shakeBuildDir, shakeVerbosity=Verbose}
 
 shakeBuildDir :: FilePath
 shakeBuildDir = "build"
@@ -21,10 +24,13 @@ shakeBuildDir = "build"
 foreignIncludeDir :: FilePath
 foreignIncludeDir = shakeBuildDir </> "include"
 
+foreignIncludeStubsDir :: FilePath
+foreignIncludeStubsDir = foreignIncludeDir <> "-stubs"
+
 -- | Returns the path to the cabal-built Haskell shared library, relative to the project dir
-cabalForeignLibPath :: FilePath -> String -> Action FilePath
+cabalForeignLibPath :: MonadIO m => FilePath -> String -> m FilePath
 cabalForeignLibPath projDir projName = do
-    Stdout out <- cmd "cabal list-bin" [[i|--project-dir=#{projDir}|], [i|#{projName}-foreign|] :: String]
+    out <- readProcess "cabal" ["list-bin", [i|--project-dir=#{projDir}|], [i|#{projName}-foreign|]] [] & liftIO
     case lines out of
       [flib_path]
         -> return $ makeRelative projDir flib_path
