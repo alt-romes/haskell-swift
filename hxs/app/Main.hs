@@ -31,6 +31,11 @@ main = do
   case cmd' of
     Init{} -> do
       initialize projectDir projName
+
+      -- We also have to build a first time, otherwise opening the project will have a lot of errors
+      -- Should we do this for them?
+      build projectDir projName
+
       -- contents <- System.Directory.getDirectoryContents projectDir
       -- if null $ drop 2 contents
       --   then do

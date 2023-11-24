@@ -3,7 +3,7 @@ module Build where
 import Development.Shake
 import Development.Shake.FilePath
 import Data.String.Interpolate
-import Common
+import Common ( shake', cabalForeignLibPath, dynamicXCConfigFile )
 
 --------------------------------------------------------------------------------
 -- Build

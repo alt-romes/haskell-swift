@@ -24,8 +24,15 @@ foreignIncludeDir = shakeBuildDir </> "include"
 -- | Returns the path to the cabal-built Haskell shared library, relative to the project dir
 cabalForeignLibPath :: FilePath -> String -> Action FilePath
 cabalForeignLibPath projDir projName = do
-    Stdout flib_path <- cmd "cabal list-bin" [[i|--project-dir=#{projDir}|], [i|#{projName}-foreign|] :: String]
-    return $ makeRelative projDir flib_path
+    Stdout out <- cmd "cabal list-bin" [[i|--project-dir=#{projDir}|], [i|#{projName}-foreign|] :: String]
+    case lines out of
+      [flib_path]
+        -> return $ makeRelative projDir flib_path
+      _ -> error $ unlines
+            [ "cabalForeignLibPath: Expecting exactly one path to the foreign library."
+            , "Instead, got:"
+            , out
+            ]
 
 --------------------------------------------------------------------------------
 -- .xcconfig
@@ -37,3 +44,4 @@ defaultDebugXCConfigFile = xcConfigsDir </> "Debug.xcconfig"
 defaultReleaseXCConfigFile = xcConfigsDir </> "Release.xcconfig"
 dynamicXCConfigFile = shakeBuildDir </> xcConfigsDir </> "Dynamic.xcconfig"
 
+-- Cabal should write dist-newstyle to build

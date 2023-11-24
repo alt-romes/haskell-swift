@@ -139,6 +139,7 @@ cabalInitOpts projName =
   , [i|--dependency=#{S.intercalate "," cabalDefaultDeps}|]
   , unwords . map (\x -> [i|--extension=#{x}|]) $
         cabalDefaultExtensions
+        -- The --extension flag adds to 'other-extensions' which I don't think adds the extension to all modules...
   ]
 
 cabalDefaultDeps :: [String]
@@ -165,7 +166,7 @@ foreign-library #{projName}-foreign
     other-modules: MyForeignLib
     hs-source-dirs: flib
     build-depends: #{projName}, #{S.intercalate ", " cabalDefaultDeps}
-    other-extensions: #{S.intercalate ", " cabalDefaultExtensions}
+    default-extensions: #{S.intercalate ", " cabalDefaultExtensions}
 
     include-dirs: cbits
     c-sources: cbits/MyForeignLibRts.c
@@ -200,7 +201,7 @@ stubMyForeignLibRtsC = [__i'E|
 
     HsBool flib_init() {
 
-        printf("Initialising flib\n");
+        printf("Initialising flib\\n");
 
         // Initialise Haskell runtime
         hs_init(NULL, NULL);
@@ -211,7 +212,7 @@ stubMyForeignLibRtsC = [__i'E|
     }
 
     void flib_end() {
-        printf("Terminating flib\n");
+        printf("Terminating flib\\n");
         hs_exit();
     }
 |]
@@ -234,9 +235,11 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
   \# Add Copy Files build phase to copy the haskell foreign library to Frameworks
   project.native_targets.each do |tgt|
     lib_file = project.new_file('#{haskellFLibRelativeToProj}')
+    \# We need to set 'CodeSignOnCopy' for the library to be linked without issues!
     copy_files_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
     copy_files_phase.symbol_dst_subfolder_spec = :frameworks
     copy_files_phase.add_file_reference(lib_file)
+    copy_files_phase.build_file(lib_file).settings = { 'ATTRIBUTES' => ['CodeSignOnCopy'] }
     tgt.build_phases << copy_files_phase
   end
 
@@ -249,7 +252,7 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
 
 defaultModuleMap :: String -> String
 defaultModuleMap projName = [__i'E|
-        module #{projName} {
+        module #{projName}HS {
             umbrella "#{foreignIncludeDir}"
 
             explicit module * {
