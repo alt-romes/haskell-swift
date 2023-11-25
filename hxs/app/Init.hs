@@ -125,7 +125,7 @@ staticXCConfig :: Text
 -- We don't do OTHER_LDFLAGS=-lhaskell-foreign-framework because we expect the `link` directive in the module map to have the same effect.
 staticXCConfig = [__i|
     SWIFT_INCLUDE_PATHS=$(PROJECT_DIR)
-    \#include "../#{dynamicXCConfigFile}"
+    \#include "#{dynamicXCConfigFile}"
 |]
 
 --------------------------------------------------------------------------------
