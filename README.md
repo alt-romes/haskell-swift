@@ -24,4 +24,10 @@ Home to haskell-swift interoperability libraries and tools
     - As I've said, this is still missing all the `@ForeingImportHaskell`,
         `$(foreignExportSwift ...)` niceties from the libraries that are WIP.
 
+- **swift-ffi**: a Haskell library with Swift foreign function interface
+    utilities (Template Haskell) for exporting Haskell functions to call from Swift
+
+- **haskell-ffi**: a Swift package with Haskell foreign function interface utilities
+    (using Swift 5.9 Macros) for importing Haskell functions to call from Swift
+
 
