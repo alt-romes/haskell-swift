@@ -262,13 +262,13 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
   end
 
   \# Add Copy Files build phase to copy the haskell foreign library to Frameworks
+  lib_file = project.new_file('#{haskellFLibRelativeToProj}')
+  \# We need to set 'CodeSignOnCopy' for the library to be linked without issues!
+  copy_files_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
+  copy_files_phase.symbol_dst_subfolder_spec = :frameworks
+  copy_files_phase.add_file_reference(lib_file)
+  copy_files_phase.build_file(lib_file).settings = { 'ATTRIBUTES' => ['CodeSignOnCopy'] }
   project.native_targets.each do |tgt|
-    lib_file = project.new_file('#{haskellFLibRelativeToProj}')
-    \# We need to set 'CodeSignOnCopy' for the library to be linked without issues!
-    copy_files_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
-    copy_files_phase.symbol_dst_subfolder_spec = :frameworks
-    copy_files_phase.add_file_reference(lib_file)
-    copy_files_phase.build_file(lib_file).settings = { 'ATTRIBUTES' => ['CodeSignOnCopy'] }
     tgt.build_phases << copy_files_phase
   end
 
