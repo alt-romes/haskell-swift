@@ -16,7 +16,7 @@ shake' :: FilePath -> Rules () -> IO ()
 shake' projDir = shake shakeOptions{shakeFiles=projDir </> shakeBuildDir, shakeVerbosity=Verbose}
 
 shakeBuildDir :: FilePath
-shakeBuildDir = "build"
+shakeBuildDir = "hxs_build"
 
 --------------------------------------------------------------------------------
 -- Haskell
