@@ -30,7 +30,7 @@ public struct HsCallJSON {
     }
 }
 
-func stub() -> Never {
+public func hstub() -> Never {
     fatalError("Somehow, a stub for a foreign-imported Haskell function was called")
 }
 
