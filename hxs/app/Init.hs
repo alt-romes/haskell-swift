@@ -14,6 +14,10 @@ import Control.Exception
 import Control.Monad
 import System.Exit (ExitCode(..))
 
+-- ROMES:TODO: What shall I do about this?
+haskelFFISwiftPackageVersion :: String
+haskelFFISwiftPackageVersion = "0.1.1"
+
 --------------------------------------------------------------------------------
 -- Initialize
 --------------------------------------------------------------------------------
@@ -304,7 +308,7 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
   \# (1)
   hsffi_pkg = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
   hsffi_pkg.repositoryURL='https://github.com/alt-romes/hsffi-swiftpkg-mirror'
-  hsffi_pkg.requirement = { 'kind' => 'upToNextMajorVersion', 'minimumVersion' => '0.1.0' }
+  hsffi_pkg.requirement = { 'kind' => 'upToNextMajorVersion', 'minimumVersion' => '#{haskelFFISwiftPackageVersion}' }
 
   \# (2)
   hsffi_prod = project.new(Xcodeproj::Project::Object::XCSwiftPackageProductDependency)
