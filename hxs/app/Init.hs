@@ -164,13 +164,15 @@ cabalInitOpts projName =
   , "--lib"
   , [i|--package-name=#{projName}|]
   , [i|--dependency=#{S.intercalate "," cabalDefaultDeps}|]
-  , unwords . map (\x -> [i|--extension=#{x}|]) $
-        cabalDefaultExtensions
-        -- The --extension flag adds to 'other-extensions' which I don't think adds the extension to all modules...
   ]
+  ++
+  -- The --extension flag adds to 'other-extensions' which I don't think adds
+  -- the extension to all modules...
+  map (\x -> [i|--extension=#{x}|])
+    cabalDefaultExtensions
 
 cabalDefaultDeps :: [String]
-cabalDefaultDeps = [ "base", "text", "bytestring", "aeson" ]
+cabalDefaultDeps = [ "base", "bytestring", "aeson" ]
 
 cabalDefaultExtensions :: [String]
 cabalDefaultExtensions = [ "ForeignFunctionInterface", "DerivingStrategies", "DerivingVia", "DeriveGeneric", "DeriveAnyClass" ]
