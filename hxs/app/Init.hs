@@ -307,7 +307,7 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
 
   \# (1)
   hsffi_pkg = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
-  hsffi_pkg.repositoryURL='https://github.com/alt-romes/hsffi-swiftpkg-mirror'
+  hsffi_pkg.repositoryURL='https://github.com/alt-romes/hsffi-swiftpkg-mirror.git'
   hsffi_pkg.requirement = { 'kind' => 'upToNextMajorVersion', 'minimumVersion' => '#{haskelFFISwiftPackageVersion}' }
 
   \# (2)
