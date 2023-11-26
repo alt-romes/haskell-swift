@@ -261,7 +261,7 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
     config.base_configuration_reference ||= project.new_file("#{xcConfigsDir}/\#{config.name}.xcconfig")
   end
 
-  \# Add Copy Files build phase to copy the haskell foreign library to Frameworks
+  \# Add Copy Files build phase to copy the haskell foreign library to Frameworks to each target
   lib_file = project.new_file('#{haskellFLibRelativeToProj}')
   \# We need to set 'CodeSignOnCopy' for the library to be linked without issues!
   copy_files_phase = project.new(Xcodeproj::Project::Object::PBXCopyFilesBuildPhase)
@@ -271,6 +271,34 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
   project.native_targets.each do |tgt|
     tgt.build_phases << copy_files_phase
   end
+
+  \# Create a (1) remote package reference, a (2) dependency on a product from that package, and a (3) build file from that product
+  \# Then, (4) add the build_file to the files of the Framework phase of each target,
+  \# (5) add the product dependency to the target, and (6) add the package reference to the main project dependencies
+
+  \# (1)
+  hsffi_pkg = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
+  hsffi_pkg.repositoryURL='https://github.com/alt-romes/hsffi-swiftpkg-mirror'
+  hsffi_pkg.requirement = { 'kind' => 'upToNextMajorVersion', 'minimumVersion' => '0.1.0' }
+
+  \# (2)
+  hsffi_prod = project.new(Xcodeproj::Project::Object::XCSwiftPackageProductDependency)
+  hsffi_prod.package = hsffi_pkg
+  hsffi_prod.product_name = "HaskellFFI"
+
+  \# (3)
+  hsffi_buildfile = project.new(Xcodeproj::Project::Object::PBXBuildFile)
+  hsffi_buildfile.product_ref = hsffi_prod
+
+  project.native_targets.each do |tgt|
+    \# (4)
+    tgt.frameworks_build_phase.files << hsffi_buildfile
+    \# (5)
+    tgt.package_product_dependencies << hsffi_prod
+  end
+
+  \# (6)
+  project.root_object.package_references << hsffi_pkg
 
   project.save
 |]
