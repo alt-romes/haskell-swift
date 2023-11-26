@@ -1,5 +1,6 @@
 module Common where
 
+import qualified Data.List as L
 import System.Process
 import Data.Function
 import Control.Monad.IO.Class
@@ -30,8 +31,9 @@ foreignIncludeStubsDir = foreignIncludeDir <> "-stubs"
 -- | Returns the path to the cabal-built Haskell shared library, relative to the project dir
 cabalForeignLibPath :: MonadIO m => FilePath -> String -> m FilePath
 cabalForeignLibPath projDir projName = do
-    out <- readProcess "cabal" ["list-bin", [i|--project-dir=#{projDir}|], [i|#{projName}-foreign|]] [] & liftIO
-    case lines out of
+    let libName = [i|#{projName}-foreign|]
+    out <- readProcess "cabal" ["list-bin", [i|--project-dir=#{projDir}|], libName] [] & liftIO
+    case filter (libName `L.isInfixOf`) $ lines out of
       [flib_path]
         -> return $ makeRelative projDir flib_path
       _ -> error $ unlines
