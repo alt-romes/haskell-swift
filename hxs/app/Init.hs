@@ -36,6 +36,8 @@ initialize projDir projName = shake' projDir do
        , "cbits" </> "MyForeignLibRts.h"
        , "cbits" </> "MyForeignLibRts.c"
 
+       , "cabal.project"
+
        , ".gitignore"
        ]
 
@@ -97,6 +99,9 @@ initialize projDir projName = shake' projDir do
 
   projDir </> "cbits" </> "MyForeignLibRts.h" %> createOnly \out -> do
     writeFile' out stubMyForeignLibRtsH
+
+  projDir </> "cabal.project" %> createOnly \out -> do
+    writeFile' out defaultCabalProject
 
   -- .gitignore
   "//.gitignore" %> createOnly \out ->
@@ -179,7 +184,7 @@ foreign-library #{projName}-foreign
 
     other-modules: MyForeignLib
     hs-source-dirs: flib
-    build-depends: #{projName}, #{S.intercalate ", " cabalDefaultDeps}
+    build-depends: #{projName}, swift-ffi, #{S.intercalate ", " cabalDefaultDeps}
     default-extensions: #{S.intercalate ", " cabalDefaultExtensions}
 
     include-dirs: cbits
@@ -200,10 +205,10 @@ stubMyForeignLib = [__i'E|
 
 stubMyForeignLibRtsH :: String
 stubMyForeignLibRtsH = [__i'E|
-  \#include <HsFFI.h>
+    \#include <HsFFI.h>
 
-  HsBool flib_init();
-  void flib_end();
+    HsBool flib_init();
+    void flib_end();
 |]
 
 
@@ -229,6 +234,16 @@ stubMyForeignLibRtsC = [__i'E|
         printf("Terminating flib\\n");
         hs_exit();
     }
+|]
+
+defaultCabalProject :: String
+defaultCabalProject = [__i'E|
+    packages: .
+
+    source-repository-package
+      type: git
+      location: https://github.com/alt-romes/haskell-swift
+      subdir: swift-ffi
 |]
 
 --------------------------------------------------------------------------------
