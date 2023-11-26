@@ -62,13 +62,21 @@ initialize projDir projName = shake' projDir do
   -- swift: Patch main
   projDir </> projName <.> "xcodeproj" </> ".hxs-stamp.swift" %> createOnly \out -> do
     let appMainPath = projDir </> projName </> [i|#{projName}App.swift|]
+        contentViewPath = projDir </> projName </> "ContentView.swift"
     appMain <- readFile' appMainPath
+    contentView <- readFile' contentViewPath
     let adjustedMain = concatMap (injectSwiftMainApp projName) (lines appMain) & unlines
+        adjustedContentView = concatMap (injectSwiftContentView projName) (lines contentView) & unlines
     writeFile' appMainPath adjustedMain
+    writeFile' contentViewPath adjustedContentView
     writeFile' out $ unlines
       [ [i|// #{projName}App.swift|]
       , defaultRTSImport projName
       , defaultRTSInitApp
+      , "// ContentView.swift"
+      , defaultHaskelFFIImports projName
+      , defaultForeignImportCV
+      , defaultHaskellHelloUI
       ]
     putInfo "Successfully adjusted the App entry point to initialize the Haskell runtime system."
 
@@ -165,7 +173,7 @@ cabalDefaultDeps :: [String]
 cabalDefaultDeps = [ "base", "text", "bytestring", "aeson" ]
 
 cabalDefaultExtensions :: [String]
-cabalDefaultExtensions = [ "ForeignFunctionInterface" ]
+cabalDefaultExtensions = [ "ForeignFunctionInterface", "DerivingStrategies", "DerivingVia", "DeriveGeneric", "DeriveAnyClass" ]
 
 foreignLibStanza :: String -> String
 foreignLibStanza projName = [i|
@@ -194,13 +202,28 @@ foreign-library #{projName}-foreign
 
 stubMyForeignLib :: String
 stubMyForeignLib = [__i'E|
+    {-\# LANGUAGE TemplateHaskell \#-}
     module MyForeignLib where
-    import Foreign.C
+    import GHC.Generics
+    import Data.Aeson
+    import Data.ByteString.Lazy (toStrict)
+    import Foreign.Swift
 
-    foreign export ccall hs_factorial :: CInt -> CInt
+    data User
+      = User
+      { favouriteNumbers :: [Int]
+      , name :: String
+      }
+      deriving stock Generic
+      deriving anyclass (FromJSON, ToJSON)
 
-    hs_factorial :: CInt -> CInt
-    hs_factorial x = product [1..x]
+    newUser :: String -> User
+    newUser n = User{favouriteNumbers = take 42 fibs, name = n}
+
+    fibs :: [Int]
+    fibs = 0 : 1 : zipWith (+) fibs (tail fibs)
+
+    $(foreignExportSwift 'newUser)
 |]
 
 stubMyForeignLibRtsH :: String
@@ -310,6 +333,12 @@ adaptXCProjRubyScript xcodeprojPathRelativeToRunner haskellFLibRelativeToProj = 
 defaultRTSImport :: String -> String
 defaultRTSImport projName = [i|import #{projName}HS.RTSManage|]
 
+defaultHaskelFFIImports :: String -> String
+defaultHaskelFFIImports projName = [__i'E|
+    import HaskellFFI
+    import #{projName}HS.MyForeignLib
+|]
+
 defaultRTSInitApp :: String
 defaultRTSInitApp = [i|
     init() {
@@ -322,11 +351,28 @@ defaultRTSInitApp = [i|
     }
 |]
 
+defaultForeignImportCV :: String
+defaultForeignImportCV = [i|
+struct User: Codable {
+    let favouriteNumbers: [Int]
+    let name: String
+}
+
+@ForeignImportHaskell
+func newUser(cconv: HsCallJSON, name: String) -> User { hstub() }
+|]
+
+defaultHaskellHelloUI :: String
+defaultHaskellHelloUI = [i|
+            let u = newUser(name: "Simon")
+            Text("User \\(u.name) really likes \\(u.favouriteNumbers.map({"\\($0)"}).joined())")
+|]
+
 injectSwiftMainApp :: String -> String -> [String]
 injectSwiftMainApp projName line
   = if | "import" `S.isInfixOf` line
-       -> [ defaultRTSImport projName
-          , line
+       -> [ line
+          , defaultRTSImport projName
           ]
        | [i|struct #{projName}App: App|] `S.isInfixOf` line
        -> [ line
@@ -335,6 +381,19 @@ injectSwiftMainApp projName line
        | otherwise
        -> [ line ]
 
+injectSwiftContentView :: String -> String -> [String]
+injectSwiftContentView projName line
+  = if | "import" `S.isInfixOf` line
+       -> [ line
+          , defaultHaskelFFIImports projName
+          , defaultForeignImportCV
+          ]
+       | "Hello, world!" `S.isInfixOf` line
+       -- Drop the "Hello, world!" line for our own
+       -> [ defaultHaskellHelloUI
+          ]
+       | otherwise
+       -> [ line ]
 
 
 --------------------------------------------------------------------------------
