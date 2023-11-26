@@ -1,14 +1,14 @@
 //
-//  AppT1App.swift
-//  AppT1
+//  AppT2App.swift
+//  AppT2
 //
-//  Created by Rodrigo Mesquita on 24/11/2023.
+//  Created by Rodrigo Mesquita on 26/11/2023.
 //
 
 import SwiftUI
 
 @main
-struct AppT1App: App {
+struct AppT2App: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
