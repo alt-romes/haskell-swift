@@ -25,6 +25,9 @@ haskelFFISwiftPackageVersion = "0.1.1"
 initialize :: FilePath -> String -> IO ()
 initialize projDir projName = shake' projDir do
 
+  when (any (== ' ') projName) $ liftIO $
+    throwIO (SpaceInProjName projName)
+
   want $ map (projDir </>)
        [ projName <.> "xcodeproj" </> "project.pbxproj"
        , projName <.> "xcodeproj" </> ".hxs-stamp.rb"
@@ -430,6 +433,7 @@ defaultModuleMap projName = [__i'E|
 data InitExceptions
     = NoInitXCodeProj FilePath
     | FailXCodeProjEdit
+    | SpaceInProjName String
 
 instance Exception InitExceptions
 instance Show InitExceptions where
@@ -448,4 +452,12 @@ instance Show InitExceptions where
       gem install xcodeproj
 
       It is unlikely, but the error might have also been caused by the (lack of) a ruby installation.
+    |]
+
+    show (SpaceInProjName projName)
+      = [__i'E|
+      Using a project name with spaces is unsupported by `hxs`.
+      Got: #{projName}
+
+      Please re-create the XCode project using a whitespace-free name.
     |]
