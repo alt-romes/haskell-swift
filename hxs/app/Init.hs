@@ -33,7 +33,7 @@ initialize projDir projName = shake' projDir do
        , projName <.> "xcodeproj" </> ".hxs-stamp.rb"
        , projName <.> "xcodeproj" </> ".hxs-stamp.swift"
 
-       , "module.modulemap"
+       , moduleMapFile
 
        , defaultDebugXCConfigFile
        , defaultReleaseXCConfigFile
@@ -88,7 +88,7 @@ initialize projDir projName = shake' projDir do
     putInfo "Successfully adjusted the App entry point to initialize the Haskell runtime system."
 
   -- module.modulemap
-  projDir </> "module.modulemap" %> createOnly \out -> do
+  projDir </> moduleMapFile %> createOnly \out -> do
     writeFile' out (defaultModuleMap projName)
 
   -- .xcconfig
@@ -179,7 +179,7 @@ cabalInitOpts projName =
     cabalDefaultExtensions
 
 cabalDefaultDeps :: [String]
-cabalDefaultDeps = [ "base", "bytestring", "aeson" ]
+cabalDefaultDeps = [ "base", "bytestring", "aeson", "containers", "text" ]
 
 cabalDefaultExtensions :: [String]
 cabalDefaultExtensions = [ "ForeignFunctionInterface", "DerivingStrategies", "DerivingVia", "DeriveGeneric", "DeriveAnyClass" ]

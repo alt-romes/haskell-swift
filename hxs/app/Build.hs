@@ -1,7 +1,9 @@
 {-# LANGUAGE BlockArguments, GeneralizedNewtypeDeriving, TypeFamilies #-}
 module Build where
 
+import Data.Function
 import GHC.Generics
+import qualified System.Directory as D
 import Data.Typeable
 import Development.Shake.Classes
 import Development.Shake
@@ -42,15 +44,21 @@ build projDir projName = shake' projDir do
     |]
 
   -- The shared library doubles as a stamp for everything else cabal builds e.g. the headers
+  -- which sounds like, and is, a terrible idea
   "foreign-shared-lib" ~> do
     _flib <- getFLibPath CabalFLibPath
     cmd_ ([i|cabal build --project-dir=#{projDir} #{projName}-foreign|] :: String)
 
     -- Then copy all include-stubs//*_stubs.h to include//*.h
+    D.createDirectoryIfMissing True (projDir </> foreignIncludeStubsDir) & liftIO
+    D.createDirectoryIfMissing True (projDir </> foreignIncludeDir) & liftIO
     stubs <- getDirectoryFiles (projDir </> foreignIncludeStubsDir) ["//*_stub.h"]
     _ <- forP stubs \stub -> do -- in parallel!
       let header_name = reverse $ drop (length "_stub.h") $ reverse (takeFileName stub)
       copyFileChanged (projDir </> foreignIncludeStubsDir </> stub) (projDir </> foreignIncludeDir </> header_name <.> "h")
+
+    -- I think that refreshing the module map re-triggers xcode into re-scanning the include dirs, I think.
+    cmd_ "touch" [projDir </> moduleMapFile]
 
     return ()
 
