@@ -64,7 +64,7 @@ foreignExportSwift fun_name = do
   fun <- FunD wrapper_name . (:[]) . (\b -> Clause (map VarP (argVars ++ [buffer, sizeptr])) (NormalB b) []) . DoE Nothing <$> do
            binds <-
              forM (zip3 orgVars argVars (drop 1 argVars)) \(org, varE -> cstr, varE -> clen) -> do
-               BindS (ConP 'Just [] [VarP org]) <$> [| decodeStrict <$> unsafePackCStringLen ($cstr, $clen) |]
+               BindS (VarP org) <$> [| unsafePackCStringLen ($cstr, $clen) >>= throwDecodeStrict |]
            let applyF = foldl AppE (VarE fun_name) (map VarE orgVars)
                resultBind
                 | resultIsIO fun_ty = BindS (VarP callresult_name) applyF
