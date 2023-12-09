@@ -41,7 +41,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
                 else {
                     return """
                     var \(arg)_data = try hs_enc.encode(\(arg))
-                    let \(arg)_datalen = Int(\(arg)_data.count)
+                    let \(arg)_datalen = Int64(\(arg)_data.count)
                     """
                 }
             }).joined(separator: "\n"),

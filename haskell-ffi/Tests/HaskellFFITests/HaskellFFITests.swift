@@ -32,8 +32,8 @@ final class HaskellFFITests: XCTestCase {
 /* Test Stubs
  (We only really care about type checking the generated code)
  */
-func hbirthday(_ a: UnsafeMutableRawPointer?, _ asize: Int, _ b: UnsafeMutableRawPointer?, _ bsize: UnsafeMutablePointer<Int>?) { hstub() }
-func hf1(_ a: UnsafeMutableRawPointer?, _ asize: Int, _ b: UnsafeRawPointer, _ c: UnsafeMutableRawPointer?, _ csize: UnsafeMutablePointer<Int>?) { hstub() }
-func hf2(_ a: UnsafeMutableRawPointer?, _ asize: Int) -> UnsafeRawPointer { hstub() }
-func hf3(_ a: UnsafeMutableRawPointer?, _ asize: Int, _ b: UnsafeRawPointer) -> UnsafeRawPointer { hstub() }
+func hbirthday(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeMutableRawPointer?, _ bsize: UnsafeMutablePointer<Int>?) { hstub() }
+func hf1(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeRawPointer, _ c: UnsafeMutableRawPointer?, _ csize: UnsafeMutablePointer<Int>?) { hstub() }
+func hf2(_ a: UnsafeMutableRawPointer?, _ asize: Int64) -> UnsafeRawPointer { hstub() }
+func hf3(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeRawPointer) -> UnsafeRawPointer { hstub() }
 
