@@ -46,6 +46,14 @@ import Foreign.Storable
 -- You likely want to use this function in conjunction with the Swift macro
 -- @\@ForeignImportHaskell@ from the Swift side, which will handle
 -- (de)serialization and calling the Haskell wrapper function.
+--
+-- Arguments and results are encoded in the following manner:
+--  * StablePtr a is kept as a Stable pointer for both args and result
+--  * Anything else is serialized to JSON
+--    * Each argument corresponds to a buffer (char*) and its size (int)
+--    * The result being serialized requires two additional args: a buffer to
+--    put the result, and a pointer to the size of that buffer that is changed
+--    to the required size
 foreignExportSwift :: Name -> Q [Dec]
 foreignExportSwift fun_name = do
   let wrapper_name_str = 'h':nameBase fun_name
