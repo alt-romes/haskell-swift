@@ -27,7 +27,10 @@ library
     -- other-modules:
     -- other-extensions:
     build-depends:    base >=4.17.0.0,
-                      aeson, bytestring, template-haskell
+                      aeson,
+                      bytestring,
+                      template-haskell,
+                      mtl
     hs-source-dirs:   src
     default-language: GHC2021
 
@@ -40,5 +43,5 @@ test-suite swift-ffi-test
     hs-source-dirs:   test
     main-is:          Main.hs
     build-depends:
-        base ^>=4.19.0.0,
+        base,
         swift-ffi
