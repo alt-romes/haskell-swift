@@ -34,7 +34,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
             }),
             
             encodedArgs = argNames.map({(arg, arg_ty) in
-                if arg_ty.description == "UnsafeRawPointer" {
+                if arg_ty.description == "UnsafeMutableRawPointer" {
                     // We receive stable ptrs unchanged
                     return ""
                 }
@@ -47,7 +47,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
             }).joined(separator: "\n"),
         
             pointersToArgs = argNames.map({(arg, arg_ty) in
-                if arg_ty.description == "UnsafeRawPointer" {
+                if arg_ty.description == "UnsafeMutableRawPointer" {
                     return ""
                 }
                 else {
@@ -58,7 +58,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
             }).joined(separator: "\n"),
             
             closePointersToArgsClosures = argNames.map({(_,arg_ty) in
-                if arg_ty.description == "UnsafeRawPointer" {
+                if arg_ty.description == "UnsafeMutableRawPointer" {
                     return ""
                 }
                 else {
@@ -67,7 +67,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
             }).joined(separator: "\n"),
         
             fcallArgs = (argNames.map({(arg, arg_ty) in
-                if arg_ty.description == "UnsafeRawPointer" {
+                if arg_ty.description == "UnsafeMutableRawPointer" {
                     "\(arg)"
                 }
                 else {
@@ -75,7 +75,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
                 }
             }) + {
                 // If the result is serialized then we need two extra arguments
-                if retType.description == "UnsafeRawPointer" {
+                if retType.description == "UnsafeMutableRawPointer" {
                     []
                 }
                 else {
@@ -94,7 +94,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
                 """,
         
             callAndReturn:StmtSyntax = {
-                if retType.description == "UnsafeRawPointer" {
+                if retType.description == "UnsafeMutableRawPointer" {
                     return "return \(fcall)"
                 }
                 else {

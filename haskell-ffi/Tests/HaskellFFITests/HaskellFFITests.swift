@@ -11,13 +11,13 @@ struct User: Codable {
 func birthday(cconv: HsCallJSON, user: User) -> User { hstub() }
 
 @ForeignImportHaskell
-func f1(cconv: HsCallJSON, user: User, p: UnsafeRawPointer) -> User { hstub() }
+func f1(cconv: HsCallJSON, user: User, p: UnsafeMutableRawPointer) -> User { hstub() }
 
 @ForeignImportHaskell
-func f2(cconv: HsCallJSON, user: User) -> UnsafeRawPointer { hstub() }
+func f2(cconv: HsCallJSON, user: User) -> UnsafeMutableRawPointer { hstub() }
 
 @ForeignImportHaskell
-func f3(cconv: HsCallJSON, user: User, p: UnsafeRawPointer) -> UnsafeRawPointer { hstub() }
+func f3(cconv: HsCallJSON, user: User, p: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer { hstub() }
 
 final class HaskellFFITests: XCTestCase {
     func testExample() throws {
@@ -33,7 +33,7 @@ final class HaskellFFITests: XCTestCase {
  (We only really care about type checking the generated code)
  */
 func hbirthday(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeMutableRawPointer?, _ bsize: UnsafeMutablePointer<Int>?) { hstub() }
-func hf1(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeRawPointer, _ c: UnsafeMutableRawPointer?, _ csize: UnsafeMutablePointer<Int>?) { hstub() }
-func hf2(_ a: UnsafeMutableRawPointer?, _ asize: Int64) -> UnsafeRawPointer { hstub() }
-func hf3(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeRawPointer) -> UnsafeRawPointer { hstub() }
+func hf1(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeMutableRawPointer, _ c: UnsafeMutableRawPointer?, _ csize: UnsafeMutablePointer<Int>?) { hstub() }
+func hf2(_ a: UnsafeMutableRawPointer?, _ asize: Int64) -> UnsafeMutableRawPointer { hstub() }
+func hf3(_ a: UnsafeMutableRawPointer?, _ asize: Int64, _ b: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer { hstub() }
 
