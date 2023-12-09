@@ -21,6 +21,8 @@
 ///
 ///     birthday(user: User(23, 2023))
 ///
+/// In function types, UnsafeRawPtrs are kept unchanged as arguments and result,
+/// while other types are serialized to and from JSON
 @attached(peer, names: overloaded)
 public macro ForeignImportHaskell() = #externalMacro(module: "HaskellFFIMacros", type: "ForeignImportHaskellMacro")
 

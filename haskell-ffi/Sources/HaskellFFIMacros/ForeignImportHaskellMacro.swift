@@ -19,48 +19,121 @@ public struct ForeignImportHaskellMacro: PeerMacro {
             throw ForeignImportHaskellError.unknownCallingConv
         }
         
-        guard let retType = sig.returnClause?.type else {
+        guard let retType:TypeSyntax = sig.returnClause?.type.trimmed else {
             throw ForeignImportHaskellError.noReturnClause
         }
         
         let usefulArgs = sig.parameterClause.parameters.dropFirst()
         
         let args = usefulArgs.map({ param in
-                "\(param.firstName)\(param.secondName ?? ""): \(param.type)" }).joined(separator: ", "),
+            "\(param.firstName)\(param.secondName ?? ""): \(param.type.trimmed)" }).joined(separator: ", "),
             
-            argNames = usefulArgs.map({param in
+            argNames = usefulArgs.map({ param in
                 let name = param.secondName ?? param.firstName
-                return name.text.filter({ $0 != " " })
+                return (name.text.filter({ $0 != " " }), param.type.trimmed)
             }),
             
-            encodedArgs = argNames.map({arg in
-                """
-                var \(arg)_data = try hs_enc.encode(\(arg))
-                let \(arg)_datalen = Int64(\(arg)_data.count)
-                """
+            encodedArgs = argNames.map({(arg, arg_ty) in
+                if arg_ty.description == "UnsafeRawPointer" {
+                    // We receive stable ptrs unchanged
+                    return ""
+                }
+                else {
+                    return """
+                    var \(arg)_data = try hs_enc.encode(\(arg))
+                    let \(arg)_datalen = Int(\(arg)_data.count)
+                    """
+                }
             }).joined(separator: "\n"),
         
-            pointersToArgs = argNames.map({arg in
-                """
-                try \(arg)_data.withUnsafeMutableBytes { (\(arg)_ptr:UnsafeMutableRawBufferPointer) in
-                """
+            pointersToArgs = argNames.map({(arg, arg_ty) in
+                if arg_ty.description == "UnsafeRawPointer" {
+                    return ""
+                }
+                else {
+                    return """
+                    try \(arg)_data.withUnsafeMutableBytes { (\(arg)_ptr:UnsafeMutableRawBufferPointer) in
+                    """
+                }
             }).joined(separator: "\n"),
             
-            closePointersToArgsClosures = argNames.map({_ in return "}"}).joined(separator: "\n"),
+            closePointersToArgsClosures = argNames.map({(_,arg_ty) in
+                if arg_ty.description == "UnsafeRawPointer" {
+                    return ""
+                }
+                else {
+                    return "}"
+                }
+            }).joined(separator: "\n"),
         
-            fcallArgs = argNames.map({ arg in
-                "\(arg)_ptr.baseAddress, \(arg)_datalen"
-            }).joined(separator: ", "),
+            fcallArgs = (argNames.map({(arg, arg_ty) in
+                if arg_ty.description == "UnsafeRawPointer" {
+                    "\(arg)"
+                }
+                else {
+                    "\(arg)_ptr.baseAddress, \(arg)_datalen"
+                }
+            }) + {
+                // If the result is serialized then we need two extra arguments
+                if retType.description == "UnsafeRawPointer" {
+                    []
+                }
+                else {
+                    ["res_ptr.baseAddress", "size_ptr.baseAddress"]
+                }
+            }()).joined(separator: ", "),
         
             fcall:ExprSyntax =
-                "h\(fname)(\(raw: fcallArgs)\(raw: fcallArgs.isEmpty ? "" : ", ")res_ptr.baseAddress, size_ptr.baseAddress)",
+                "h\(fname)(\(raw: fcallArgs))",
             
             decodeAndReturnResult:StmtSyntax =
                 """
                 let new_data = Data(bytesNoCopy: res_ptr.baseAddress!, count: size_ptr.baseAddress?.pointee ?? 0, deallocator: .none)
-                print("Read JSON from Haskell: \\(String(bytes: new_data, encoding: .uft8) ?? "???")")
+                print("Read JSON from Haskell: \\(String(bytes: new_data, encoding: .utf8) ?? "???")")
                 return try hs_dec.decode(\(retType).self, from: new_data)
-                """
+                """,
+        
+            callAndReturn:StmtSyntax = {
+                if retType.description == "UnsafeRawPointer" {
+                    return "return \(fcall)"
+                }
+                else {
+                    return """
+                    // Allocate buffer for result and allocate a pointer to an int with the initial size of the buffer
+                    let buf_size = 1024000
+                    enum HsFFIError: Error {
+                        case requiredSizeIs(Int)
+                    }
+                    return try withUnsafeTemporaryAllocation(of: Int.self, capacity: 1) { size_ptr in
+                        size_ptr.baseAddress?.pointee = buf_size
+                        
+                        do {
+                            return try withUnsafeTemporaryAllocation(byteCount: buf_size, alignment: 1) { res_ptr in
+                                
+                                \(fcall)
+                                
+                                if let required_size = size_ptr.baseAddress?.pointee {
+                                    if required_size > buf_size {
+                                        throw HsFFIError.requiredSizeIs(required_size)
+                                    }
+                                }
+                    
+                                \(decodeAndReturnResult)
+                            }
+                        } catch HsFFIError.requiredSizeIs(let required_size) {
+                            print("Retrying with required size: \\(required_size)")
+                            return try withUnsafeTemporaryAllocation(byteCount: required_size, alignment: 1) { res_ptr in
+                                size_ptr.baseAddress?.pointee = required_size
+                                
+                                \(fcall)
+                                \(decodeAndReturnResult)
+                            }
+                        }
+                    }
+                    """
+                }
+            }()
+        
         
         return [
         """
@@ -71,37 +144,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
             \(raw: encodedArgs)
             return try {
               \(raw: pointersToArgs)
-                // Allocate buffer for result and allocate a pointer to an int with the initial size of the buffer
-                let buf_size = 1024000
-                enum HsFFIError: Error {
-                    case requiredSizeIs(Int)
-                }
-                return try withUnsafeTemporaryAllocation(of: Int.self, capacity: 1) { size_ptr in
-                    size_ptr.baseAddress?.pointee = buf_size
-                    
-                    do {
-                        return try withUnsafeTemporaryAllocation(byteCount: buf_size, alignment: 1) { res_ptr in
-                            
-                            \(fcall)
-                            
-                            if let required_size = size_ptr.baseAddress?.pointee {
-                                if required_size > buf_size {
-                                    throw HsFFIError.requiredSizeIs(required_size)
-                                }
-                            }
-        
-                            \(decodeAndReturnResult)
-                        }
-                    } catch HsFFIError.requiredSizeIs(let required_size) {
-                        print("Retrying with required size: \\(required_size)")
-                        return try withUnsafeTemporaryAllocation(byteCount: required_size, alignment: 1) { res_ptr in
-                            size_ptr.baseAddress?.pointee = required_size
-                            
-                            \(fcall)
-                            \(decodeAndReturnResult)
-                        }
-                    }
-                }
+                \(callAndReturn)
               \(raw: closePointersToArgsClosures)
             }()
           } catch {
