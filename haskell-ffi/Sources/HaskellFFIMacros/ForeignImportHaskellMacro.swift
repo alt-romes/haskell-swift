@@ -101,9 +101,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
                     return """
                     // Allocate buffer for result and allocate a pointer to an int with the initial size of the buffer
                     let buf_size = 1024000
-                    enum HsFFIError: Error {
-                        case requiredSizeIs(Int)
-                    }
+                    
                     return try withUnsafeTemporaryAllocation(of: Int.self, capacity: 1) { size_ptr in
                         size_ptr.baseAddress?.pointee = buf_size
                         
@@ -117,7 +115,7 @@ public struct ForeignImportHaskellMacro: PeerMacro {
                                         throw HsFFIError.requiredSizeIs(required_size)
                                     }
                                 }
-                    
+                        
                                 \(decodeAndReturnResult)
                             }
                         } catch HsFFIError.requiredSizeIs(let required_size) {
@@ -139,16 +137,16 @@ public struct ForeignImportHaskellMacro: PeerMacro {
         """
         func \(fname)(\(raw: args)) -> \(retType) {
           \(raw: args.isEmpty ? "" : "let hs_enc = JSONEncoder()")
-          let hs_dec = JSONDecoder()
+          \(raw: retType.description == "UnsafeMutableRawPointer" ? "" : "let hs_dec = JSONDecoder()")
           do {
             \(raw: encodedArgs)
-            return try {
+            return \(raw: pointersToArgs.isEmpty ? "" : "try ") {
               \(raw: pointersToArgs)
-                \(callAndReturn)
+              \(callAndReturn)
               \(raw: closePointersToArgsClosures)
             }()
           } catch {
-              fatalError("Error decoding JSON marshaled from Haskell, probably: \\(error)")
+            fatalError("Error decoding JSON marshaled from Haskell, probably: \\(error)")
           }
         }
         """
@@ -172,6 +170,8 @@ public enum ForeignImportHaskellError: CustomStringConvertible, Error {
         }
     }
 }
+
+
 
 @main
 struct ForeignImportHaskellMacroPlugin: CompilerPlugin {
