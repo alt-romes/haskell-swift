@@ -33,6 +33,10 @@ public struct HsCallJSON {
     }
 }
 
+public enum HsFFIError: Error {
+    case requiredSizeIs(Int)
+}
+
 public func hstub() -> Never {
     fatalError("Somehow, a stub for a foreign-imported Haskell function was called")
 }
