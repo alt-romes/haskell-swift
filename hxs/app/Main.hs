@@ -52,6 +52,7 @@ main = do
       phony "clean" do
         putInfo "Deleting files in _build"
         removeFilesAfter buildDir ["//*"]
+        removeFilesAfter (projectDir </> "dist-newstyle") ["//*"]
 
 
 --------------------------------------------------------------------------------

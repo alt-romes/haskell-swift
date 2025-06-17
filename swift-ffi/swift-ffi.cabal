@@ -30,7 +30,8 @@ library
                       aeson,
                       bytestring,
                       template-haskell,
-                      mtl
+                      mtl,
+                      moat
     hs-source-dirs:   src
     default-language: GHC2021
 

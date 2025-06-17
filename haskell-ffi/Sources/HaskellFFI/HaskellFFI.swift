@@ -15,6 +15,7 @@
 ///
 /// can be imported into Swift by writing
 ///
+///     @ForeignImportHaskell
 ///     func birthday(cconv: HsCallJSON, user: User) -> User { stub() }
 ///
 /// and then simply called as
