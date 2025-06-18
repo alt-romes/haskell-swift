@@ -2,13 +2,13 @@
 module Foreign.Swift
   ( foreignExportSwift
     -- ** Re-exports
-  , BS.toStrict
-  , Generic
-  , module Data.Aeson
+  , BS.toStrict -- must be in scope where the generated code is spliced
+    -- *** You're using TH already: might as well use it for deriving JSON.
+  , deriveJSON, defaultOptions
   )
   where
 
-import GHC.Generics
+import Data.Aeson.TH
 import qualified Data.ByteString.Lazy as BS
 import Control.Monad.State
 import Data.Aeson

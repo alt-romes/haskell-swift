@@ -24,6 +24,8 @@ common extensions
 library
     import:           warnings, extensions
     exposed-modules:  Foreign.Swift
+                      Foreign.Swift.Lib
+                      Foreign.Swift.SetupHooks
     -- other-modules:
     -- other-extensions:
     build-depends:    base >=4.17.0.0,
@@ -31,7 +33,9 @@ library
                       bytestring,
                       template-haskell,
                       mtl,
-                      moat
+                      moat,
+                      -- automatic swift lib SetupHooks
+                      Cabal-hooks >= 3.14
     hs-source-dirs:   src
     default-language: GHC2021
 
