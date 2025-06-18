@@ -5,6 +5,9 @@ module Foreign.Swift
   , BS.toStrict -- must be in scope where the generated code is spliced
     -- *** You're using TH already: might as well use it for deriving JSON.
   , deriveJSON, defaultOptions
+
+    -- ** Internal utils
+  , tyFunArgsTy, tyFunResTy
   )
   where
 

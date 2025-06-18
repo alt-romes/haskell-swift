@@ -31,6 +31,7 @@ library
     build-depends:    base >=4.17.0.0,
                       aeson,
                       bytestring,
+                      filepath, directory,
                       template-haskell,
                       mtl,
                       moat,

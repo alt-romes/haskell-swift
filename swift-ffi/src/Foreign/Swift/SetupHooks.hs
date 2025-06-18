@@ -4,6 +4,7 @@ module Foreign.Swift.SetupHooks where
 
 import Distribution.Simple.SetupHooks
 
+foreignSwiftSetupHooks :: SetupHooks
 foreignSwiftSetupHooks = noSetupHooks
   { buildHooks = noBuildHooks
     { preBuildComponentRules = Nothing -- todo: delete existing distribution files before writing on top? Or just make sure to always write to a temp dir...
