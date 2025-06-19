@@ -205,7 +205,7 @@ encodeRes ty callresult_name = do
     JSONKind -> do
       -- In all other cases try to serialize the result
       [buffer, sizeptr] <- needArgs 2
-      [| (>>= toSwift) $ \bs -> unsafeUseAsCStringLen bs $ \(ptr,len) -> do
+      [| (toSwift $(varE callresult_name) >>=) $ \bs -> unsafeUseAsCStringLen bs $ \(ptr,len) -> do
             size_avail <- peek $(varE sizeptr)
             -- Write actual size to intptr
             -- We always do this, either to see if we've overshot the buffer, or to

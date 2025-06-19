@@ -80,7 +80,7 @@ type family AddArg (a :: ForeignValKind) (b :: Type) (c :: Type) :: Type where
   AddArg JSONKind _ c = Ptr CChar -> Int -> c
   AddArg PtrKind  b c = FFIArgLit b -> c
 type family AddResult (a :: ForeignValKind) (b :: Type) :: Type where
-  AddResult JSONKind b = Ptr CChar -> Int -> IO ()
+  AddResult JSONKind b = Ptr CChar -> Ptr Int -> IO ()
   AddResult PtrKind  b = IO (FFIResultLit b)
 
 --------------------------------------------------------------------------------
