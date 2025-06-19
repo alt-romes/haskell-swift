@@ -4,7 +4,7 @@
 -- TemplateHaskell and Cabal SetupHooks
 module Foreign.Swift.Lib
   ( -- * Datatypes
-    swiftType
+    swiftData
   , yieldType
     -- * Functions
   , yieldFunction
@@ -12,7 +12,6 @@ module Foreign.Swift.Lib
     -- ** Re-exports
   , Proxy(..)
   , Aeson.deriveJSON, Aeson.defaultOptions
-  , toStrict -- must be in scope where the generated code is spliced
   ) where
 
 import qualified Data.Aeson as Aeson
@@ -38,9 +37,9 @@ import Control.Monad
 
 -- | Yield a datatype declaration for the given datatype name
 --
--- Example of top level splice: @$(swiftType ''User)@
-swiftType :: Name -> Q [Dec]
-swiftType name = do
+-- Example of top level splice: @$(swiftData ''User)@
+swiftData :: Name -> Q [Dec]
+swiftData name = do
   -- generate Moat class instances
   mg <- mobileGenWith defaultOptions { dataProtocols = [Codable] } name
 

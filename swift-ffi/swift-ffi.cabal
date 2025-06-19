@@ -24,8 +24,10 @@ common extensions
 library
     import:           warnings, extensions
     exposed-modules:  Foreign.Swift
+                      Foreign.Swift.Marshal
                       Foreign.Swift.Lib
                       Foreign.Swift.SetupHooks
+                      Foreign.Swift.Utils
     -- other-modules:
     -- other-extensions:
     build-depends:    base >=4.17.0.0,

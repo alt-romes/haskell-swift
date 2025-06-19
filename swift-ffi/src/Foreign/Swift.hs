@@ -1,15 +1,24 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 module Foreign.Swift
   ( foreignExportSwift
+
+    -- * Marshaling
+  , swiftMarshal
+  , ForeignValKind(..)
+  , PtrMarshal(..)
+  , JSONMarshal(..)
+
     -- ** Re-exports
-  , BS.toStrict -- must be in scope where the generated code is spliced
-    -- *** You're using TH already: might as well use it for deriving JSON.
+    -- | You're using TH already: might as well use it for deriving JSON.
   , deriveJSON, defaultOptions
 
     -- ** Internal utils
   , tyFunArgsTy, tyFunResTy
   )
   where
+
+import Foreign.Swift.Marshal
 
 import Data.Aeson.TH
 import qualified Data.ByteString.Lazy as BS
@@ -122,7 +131,6 @@ buildBodyWithArgs names (BodyBuilder bb) = do
   return a
 
 -- | Take @N@ arguments from the arguments allocated for the foreign wrapper function
--- ROMES:TODO: Vecs and Nats!!
 needArgs :: Int -> BodyBuilder [Name]
 needArgs n = BodyBuilder $ do
   needed <- gets (take n)
@@ -133,7 +141,9 @@ needArgs n = BodyBuilder $ do
 -- Encoding and Decoding arguments
 --------------------------------------------------------------------------------
 
--- | Decodes an argument from the wrapper functions and binds it to the name of the original argument (to eventually pass to the function call that we are wrapping)
+-- | Decodes an argument from the wrapper functions and binds it to the name of
+-- the original argument (to eventually pass to the function call that we are
+-- wrapping)
 decodeArg :: Name
           -- ^ The name to which the decoded argument should be bound
           -> Type
@@ -190,27 +200,10 @@ encodeRes _ callresult_name
 -- | Create the type of the function that will be exported from the type of the
 -- original function which will be wrapped.
 --
--- ROMES:TODO: Still incomplete (e.g. ForallT)
+-- The implementation simply uses the 'ForeignTypeOf' type family to determine
+-- the final foreign export signature. 
 makeWrapperTy :: Type -> Q Type
--- Wrapping an argument
-makeWrapperTy (AppT (AppT ArrowT (AppT (ConT n) a)) b)
-  -- For StablePtrs keep the arg unchanged
-  | n == ''StablePtr
-  = [t| StablePtr $(pure a) -> $(makeWrapperTy b) |]
-makeWrapperTy (AppT (AppT ArrowT _a) b)
-  -- For anything else serialize using a char* and size_t
-  = [t| Ptr CChar -> Int -> $(makeWrapperTy b) |]
-
--- Wrapping the result
-makeWrapperTy (AppT (ConT io) (AppT (ConT stable_ptr) a))
-  -- StablePtrs can only be returned in IO actions, so we only check if result
-  -- is IO (StablePtr _) and not (StablePtr _)
-  | io == ''IO
-  , stable_ptr == ''StablePtr
-  = [t| IO (StablePtr $(pure a)) |]
-makeWrapperTy _x
-  -- Arguments for the result if it cannot be trivially converted
-  = [t| Ptr CChar -> Ptr Int -> IO () |]
+makeWrapperTy ty = [t| ForeignTypeOf $(pure ty) |]
 
 --------------------------------------------------------------------------------
 -- Utils
