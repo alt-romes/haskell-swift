@@ -28,9 +28,11 @@ library
                       Foreign.Swift.Lib
                       Foreign.Swift.SetupHooks
                       Foreign.Swift.Utils
+
+                      Foreign.Swift.Plugin
     -- other-modules:
     -- other-extensions:
-    build-depends:    base >=4.17.0.0,
+    build-depends:    base >=4.17,
                       aeson,
                       bytestring,
                       filepath, directory,
@@ -38,7 +40,8 @@ library
                       mtl,
                       moat,
                       -- automatic swift lib SetupHooks
-                      Cabal-hooks >= 3.14
+                      Cabal-hooks >= 3.14,
+                      ghc >= 9.10
     hs-source-dirs:   src
     default-language: GHC2021
 

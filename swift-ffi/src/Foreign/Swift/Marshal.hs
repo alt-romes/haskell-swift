@@ -10,15 +10,10 @@ import Data.Aeson
 import Data.Coerce (coerce)
 import Data.Kind (Type)
 import Foreign.C
-import Data.Void
 
 import Foreign.Swift.Utils
 import Moat (ToMoatType)
 import Control.Monad
-
-data SwiftVal a
-  = JSONVal BS.ByteString
-  | PtrVal (StablePtr a)
 
 class ToSwift a where
   type ForeignResultKind a :: ForeignValKind
@@ -27,7 +22,7 @@ class ToSwift a where
   -- the case when @ForeignValKind != JSONKind@
   type FFIResultLit a :: Type
 
-  toSwift :: a -> IO (SwiftVal a)
+  toSwift :: a -> IO (FFIResultLit a)
 
 class FromSwift a where
 
@@ -37,7 +32,7 @@ class FromSwift a where
   -- the case when @ForeignValKind != JSONKind@
   type FFIArgLit a :: Type
 
-  fromSwift :: SwiftVal a -> IO a
+  fromSwift :: FFIArgLit a -> IO a
 
 data ForeignValKind = JSONKind | PtrKind
   deriving Eq
@@ -113,27 +108,25 @@ newtype JSONMarshal a = JSONMarshal a
 
 instance ToJSON a => ToSwift (JSONMarshal a) where
   type ForeignResultKind (JSONMarshal a) = JSONKind
-  type FFIResultLit      (JSONMarshal a) = Void -- never used bc JSONKind
-  toSwift = pure . JSONVal . BS.toStrict . encode
+  type FFIResultLit      (JSONMarshal a) = BS.ByteString
+  toSwift = pure . BS.toStrict . encode
 
 instance FromJSON a => FromSwift (JSONMarshal a) where
   type ForeignArgKind (JSONMarshal a) = JSONKind
-  type FFIArgLit      (JSONMarshal a) = Void -- never used bc JSONKind
-  fromSwift (JSONVal b) = throwDecodeStrict b
-  fromSwift (PtrVal _) = error "what"
+  type FFIArgLit      (JSONMarshal a) = BS.ByteString
+  fromSwift b = throwDecodeStrict b
 
 instance ToSwift (PtrMarshal a) where
   type ForeignResultKind (PtrMarshal a) = PtrKind
   type FFIResultLit      (PtrMarshal a) = StablePtr a
   toSwift (PtrMarshal a) = do
     ptr <- newStablePtr a
-    pure $ PtrVal (coerce ptr)
+    pure $ coerce ptr
 
 instance FromSwift (PtrMarshal a) where
   type ForeignArgKind (PtrMarshal a) = PtrKind
   type FFIArgLit      (PtrMarshal a) = StablePtr a
-  fromSwift (JSONVal _) = error "what2"
-  fromSwift (PtrVal p) = do
+  fromSwift p = do
     ptr <- deRefStablePtr p
     pure $ coerce ptr
 
