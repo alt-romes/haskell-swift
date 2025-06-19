@@ -29,7 +29,6 @@ library
                       Foreign.Swift.SetupHooks
                       Foreign.Swift.Utils
 
-                      Foreign.Swift.Plugin
     -- other-modules:
     -- other-extensions:
     build-depends:    base >=4.17,
