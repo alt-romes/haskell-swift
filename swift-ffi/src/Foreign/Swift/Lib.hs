@@ -6,9 +6,10 @@
 module Foreign.Swift.Lib
 -- todo: probably rename this e.g. Data and/move something else soemwhere like Yield?
 
-  ( plugin, SwiftExport(..)
+  ( plugin, SwiftExport(..), genSwiftActionAndAnn
     -- * Datatypes
   , swiftData
+  , swiftPtr
   , yieldType
     -- * Functions
   , yieldFunction
@@ -19,7 +20,6 @@ module Foreign.Swift.Lib
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.TH as Aeson
-import qualified Data.Kind as K
 import Language.Haskell.TH as TH hiding (Name, ppr)
 import qualified Language.Haskell.TH as TH (Name)
 import Moat
@@ -36,7 +36,7 @@ import Data.Data (Data)
 
 import GHC.Plugins
 import GHC.Utils.Trace
-import GHC.Types.TyThing (MonadThings(..), TyThing (..))
+import GHC.Types.TyThing (MonadThings(..), TyThing (..), tyThingId)
 import qualified GHC.Tc.Utils.TcType as Core
 import qualified Data.List as List
 import qualified GHC.Types.Name.Occurrence as NameSpace
@@ -49,11 +49,11 @@ import GHC.Core.ConLike (ConLike(..))
 import GHC.Unit.External
 import GHC.Core.TyCo.Compare (eqType)
 import qualified GHC.Core.Class as Core
-import Data.IORef
+import Language.Haskell.TH.Syntax (Lift (..))
 
 data SwiftExport = ExportSwiftData (String {- tycon name -})
                  | ExportSwiftFunction
-  deriving (Show, Data)
+  deriving (Show, Data, Lift)
 
 instance Outputable SwiftExport where
   ppr s = text (show s)
@@ -65,48 +65,39 @@ instance Outputable SwiftExport where
 plugin :: Plugin
 plugin = defaultPlugin
   { installCoreToDos = \_ tds ->
-      return (tds ++ [CoreDoPluginPass "swift-ffi" yieldSwiftCode]) }
+      return (CoreDoPluginPass "swift-ffi" yieldSwiftCode : tds) }
 
 yieldSwiftCode :: ModGuts -> CoreM ModGuts
 yieldSwiftCode g@ModGuts{..} = do
+  hsc_env <- getHscEnv
   let modname = moduleNameString . moduleName $ mg_module
-
-  yieldTypeId       <- lookupFunctionId mg_rdr_env "yieldType"
-  yieldFunctionId   <- lookupFunctionId mg_rdr_env "yieldFunction"
-  proxyDataCon      <- getProxyDataCon  mg_rdr_env
-  toMoatTypeCls     <- getToMoatTypeCls mg_rdr_env
-
-  let proxy ty    = Core.Var proxyDataCon `Core.App` Core.Type ty
-      getMoatTyInstDict ty = do
-        lookupInstance g toMoatTypeCls ty >>= \case
-          Just ClsInst{is_dfun} -> return is_dfun
-          Nothing -> error $ "MoatTyInst not found for " ++ showPprUnsafe ty
 
   (_, anns) <- getFirstAnnotations deserializeWithData g
 
+  -- yieldTypeId       <- lookupFunctionId mg_rdr_env "yieldType"
+  --
+  -- yieldFunctionId   <- lookupFunctionId mg_rdr_env "yieldFunction"
+  -- proxyDataCon      <- getProxyDataCon  mg_rdr_env
+  -- toMoatTypeCls     <- getToMoatTypeCls mg_rdr_env
+  --
+  -- let proxy ty    = Core.Var proxyDataCon `Core.App` Core.Type ty
+  --     getMoatTyInstDict ty = do
+  --       lookupInstance g toMoatTypeCls ty >>= \case
+  --         Just ClsInst{is_dfun} -> return is_dfun
+  --         Nothing -> error $ "MoatTyInst not found for " ++ showPprUnsafe ty
+
   forM_ (nonDetUFMToList anns) $ \case
-    (_u, ExportSwiftData str) -> do
-      lookupTypeByName mg_rdr_env str >>= \case
-        Nothing -> error "exported data not found!?"
-        Just ty -> do
-          pprTraceM ("found type for " ++ str ++ ": ") (ppr ty)
-          dictExpr <- Core.Var <$> getMoatTyInstDict ty
-          runCoreExpr (Core.Var yieldTypeId `Core.App` dictExpr
-                                            `Core.App` (proxy ty))
-    (uq, ExportSwiftFunction) -> do
-      -- linear search; whatever
-      case List.find (\b -> getUnique b == uq) (bindersOfBinds mg_binds) of
-        Nothing -> error "exported function not found!"
-        Just bndr -> do
-          let ty = idType bndr
-          dictExpr <- Core.Var <$> getMoatTyInstDict ty
-          pprTraceM ("found type for: ") (ppr (getName bndr) <+> ppr ty)
-          funNameExpr <- mkStringExpr (occNameString $ getOccName bndr)
-          modnameExpr <- mkStringExpr modname
-          runCoreExpr (Core.Var yieldFunctionId `Core.App` dictExpr
-                                                `Core.App` proxy ty
-                                                `Core.App` funNameExpr
-                                                `Core.App` modnameExpr)
+    (uq, _exportType :: SwiftExport) -> do
+      let
+        bindsToIds (NonRec v _)   = [v]
+        bindsToIds (Rec    binds) = map fst binds
+        ids = concatMap bindsToIds mg_binds
+
+      let Just genId = List.find (\x -> uq == getUnique x) ids
+      liftIO $ putStrLn "Generating..."
+      runCoreExpr (Var genId)
+      liftIO $ putStrLn "Done"
+
 
   return g
 
@@ -205,6 +196,11 @@ swiftData name = do
       tyVars _ret = []
   tyNames <- mapM (\_ -> VarT <$> newName "a") (tyVars kind)
   let typ = foldl' AppT (ConT name) tyNames
+      -- Like `typ`, but use units. Used in genSwiftActionAndAnn rather than
+      -- using metavariables when applying to phantom roles (only way...)
+      -- How to generate types that are generic? I think this may be the right way but I'm unsure.
+      tyUnits = map (\_ -> ConT ''()) (tyVars kind)
+      typWithUnits = foldl' AppT (ConT name) tyUnits
 
   hasToJSON <- isInstance ''Aeson.ToJSON [typ]
   hasFromJSON <- isInstance ''Aeson.FromJSON [typ]
@@ -214,17 +210,48 @@ swiftData name = do
   fromJSON <- if hasFromJSON then pure []
               else Aeson.deriveFromJSON Aeson.defaultOptions name
 
-  ann <- AnnP (TypeAnnotation name) <$> [| ExportSwiftData $(litE $ StringL $ nameBase name) |]
+  gens <- genSwiftActionAndAnn name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
 
-  return (PragmaD ann : mg ++ toJSON ++ fromJSON)
+  return (mg ++ toJSON ++ fromJSON ++ gens)
+
+-- | Generate a ToMoatType for a datatype that will wrap a stable pointer
+-- TODO: Support for types with type variables
+swiftPtr :: TH.Name -> Q [Dec]
+swiftPtr name = do
+  [d| instance ToMoatType $(conT name) where
+        toMoatType _ = Concrete
+          { concreteName = $(lift $ nameBase name)
+          , concreteTyVars = [{-todo-}] }
+
+      instance ToMoatData $(conT name) where
+        toMoatData _ = MoatAlias
+          { aliasName = $(lift $ nameBase name)
+          , aliasDoc = Nothing -- todo
+          , aliasTyVars = [] -- todo
+          , aliasTyp = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
+          }
+    |]
+
 
 -- | Output a Swift datatype declaration to a file using the current module
 -- name as the filename.
-yieldType :: forall (a :: K.Type) c. ToMoatData a => Proxy a -> String
-          -> IO [c] -- ^ Return type compatible with @'evalStmt'@
-yieldType prx modname = do
-  outputCode modname $ generateSwiftCode prx ++ "\n"
-  return []
+yieldType :: Q Exp -- ^ Proxy @ty expression
+          -> Q Exp
+yieldType prx = do
+  outputCode [| generateSwiftCode $prx ++ "\n" |]
+
+-- | Generate an IO action which, when run, will generate swift code and output
+-- it to a file.
+-- It also attaches an annotation pragma so the plugin can find this action and run it.
+genSwiftActionAndAnn :: TH.Name -> TH.Type -> Code Q SwiftExport -> Q [Dec]
+genSwiftActionAndAnn name ty exportAnn = do
+  genName <- newName ("gen_swift_" ++ nameBase name)
+  ann <- AnnP (ValueAnnotation genName) <$> unTypeCode exportAnn
+  -- The generated function which outputs Swift code is going to be run by the plugin
+  genFunSig <- SigD genName <$> [t| IO () |]
+  genFunBody <- yieldFunction [| Proxy @($(pure ty)) |] (nameBase genName)
+  let genFun = FunD genName [Clause [] (NormalB genFunBody) []]
+  return [genFun, genFunSig, PragmaD ann]
 
 --------------------------------------------------------------------------------
 -- * Functions
@@ -236,49 +263,49 @@ yieldType prx modname = do
 -- @
 -- yieldFunction @(Query -> Int -> String) 'f [Just "x", Nothing] Proxy
 -- @
-yieldFunction :: forall (a :: K.Type) b. ToMoatType a
-              => Proxy a
+yieldFunction :: Q Exp  -- ^ Proxy @ty expr
               -> String -- ^ Function name
-              -> String -- ^ Module name
-              -> IO [b] -- ^ Return type compatible with @'evalStmt'@
-yieldFunction prx name modname = do
-  -- Function must be exported
-  let moatTy = toMoatType prx
-      (argTys, retTy) = splitRetMoatTy ([], undefined) moatTy
+              -> Q Exp
+yieldFunction prx name = do
+  outputCode [|
+    do
+      let moatTy = toMoatType $prx
+          (argTys, retTy) = splitRetMoatTy ([], undefined) moatTy
+          splitRetMoatTy (args, r) (Moat.App arg c) = splitRetMoatTy (arg:args, r) c
+          splitRetMoatTy (args, _) ret = (reverse args, ret)
 
-  swiftParams <- zipWithM prettyParam [1..] argTys
+      swiftParams <- liftIO $ zipWithM prettyParam [1..] argTys
 
-  outputCode modname $ unlines
-    [ "@ForeignImportHaskell"
-    , "func " ++ name ++ "(cconv: HsCallJSON" ++ (if null swiftParams then "" else ", ") ++ concat (intersperse ", " swiftParams) ++ ")"
-              ++ " -> " ++ prettyMoatType retTy
-    , "{ stub() }"
-    ]
-  return []
-
-  where
-    splitRetMoatTy (args, r) (Moat.App arg c) = splitRetMoatTy (arg:args, r) c
-    splitRetMoatTy (args, _) ret = (reverse args, ret)
+      return $ unlines
+        [ "@ForeignImportHaskell"
+        , "func " ++ $(litE $ StringL name) ++ "(cconv: HsCallJSON" ++ (if null swiftParams then "" else ", ") ++ concat (intersperse ", " swiftParams) ++ ")"
+                  ++ " -> " ++ prettyMoatType retTy
+        , "{ stub() }"
+        ]
+    |]
 
 --------------------------------------------------------------------------------
 -- * Utils
 --------------------------------------------------------------------------------
 
--- | Yield a piece of code to the current module being generated.
--- Note that code is only yielded after typechecking (as a finalizer)
-outputCode :: String -> String -> IO ()
-outputCode modname code = do
-  let loc = buildDir </> locToFile modname
+-- | Yield an expression which will yield a piece of code to the current module being generated.
+outputCode :: Q Exp -> Q Exp
+outputCode produceCode = do
+  loc <- (buildDir </>) . locToFile . loc_module <$> location
 
-  -- When this splice runs (rather than when module is finalized)
-  -- Reset the files written by it
-  removeFile loc `catch ` \case e | isDoesNotExistError e -> pure ()
-                                  | otherwise -> throwIO e
+  -- When this splice runs (rather than when the produced expression is run)
+  -- reset the files written by it
+  runIO $
+    removeFile loc `catch ` \case e | isDoesNotExistError e -> pure ()
+                                    | otherwise -> throwIO e
+  [| do
 
-  -- When mod is finalizer, write all swift code to file from scratch
-  createDirectoryIfMissing True (takeDirectory loc)
-  putStrLn $ "Writing Swift code to: " ++ loc
-  appendFile loc (code ++ "\n")
+      -- When mod is finalizer, write all swift code to file from scratch
+      createDirectoryIfMissing True (takeDirectory loc)
+      putStrLn $ "Writing Swift code to: " ++ loc
+      code <- $produceCode
+      appendFile loc (code ++ "\n")
+   |]
 
 -- | Where to write lib
 buildDir :: FilePath

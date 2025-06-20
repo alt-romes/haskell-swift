@@ -17,8 +17,8 @@ module Foreign.Swift
   where
 
 import Foreign.Swift.Marshal
+import Foreign.Swift.Lib
 
-import Data.Aeson.TH
 import Control.Monad.State
 import Foreign.Marshal
 import Language.Haskell.TH
@@ -122,9 +122,9 @@ foreignExportSwift fun_name = do
       final <- encodeRes origResTy callresult_name
       return (binds++[resultBind]++[NoBindS final])
 
-  ann <- AnnP (ValueAnnotation fun_name) <$> [| ExportSwiftFunction |]
+  gens <- genSwiftActionAndAnn fun_name (dropResultIO origin_ty) [|| ExportSwiftFunction ||]
 
-  return [PragmaD ann, fsig, fun, fexp]
+  return ([fsig, fun, fexp] ++ gens)
 
 --------------------------------------------------------------------------------
 -- Foreign-wrapper builder monad
@@ -297,7 +297,7 @@ unsafeRunTcM m = unsafeCoerce (\_ -> m)
 -- | Extract the types of each argument of the given function type into a list and the result type separate
 tyFunSplitTy :: Type -> ([Type], Type)
 tyFunSplitTy (AppT (AppT ArrowT a) b) = first (a:) (tyFunSplitTy b)
-tyFunSplitTy (ForallT _ _ c) = tyFunSplitTy c
+tyFunSplitTy (ForallT _ _ c) = tyFunSplitTy c -- ghmm..
 tyFunSplitTy r = ([], r)
 
 tyFunSplitCoreTy :: Core.Type -> ([Core.Type], Core.Type)
@@ -309,3 +309,13 @@ tyFunSplitCoreTy r = ([], r)
 stripTyIO :: Type -> Type
 stripTyIO (AppT (ConT n) t) | n == ''IO = t
 stripTyIO t = t
+
+-- | Drop `IO` from the result type.
+-- We need this because ToMoatType doesn't have an IO instance and we only care
+-- that on the swift side we get the right result type (without IO)
+dropResultIO :: Type -> Type
+dropResultIO (AppT (AppT ArrowT a) b) = AppT (AppT ArrowT a) (dropResultIO b)
+dropResultIO (AppT (ConT n) t)
+  | n == ''IO = t
+  | otherwise = AppT (ConT n) t
+dropResultIO t = t
