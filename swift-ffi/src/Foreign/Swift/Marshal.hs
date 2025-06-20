@@ -17,21 +17,12 @@ import Control.Monad
 
 class ToSwift a where
   type ForeignResultKind a :: ForeignValKind
-
-  -- | We care about what the literal type used for the interface should be in
-  -- the case when @ForeignValKind != JSONKind@
   type FFIResultLit a :: Type
-
   toSwift :: a -> IO (FFIResultLit a)
 
 class FromSwift a where
-
   type ForeignArgKind a :: ForeignValKind
-
-  -- | We care about what the literal type used for the interface should be in
-  -- the case when @ForeignValKind != JSONKind@
   type FFIArgLit a :: Type
-
   fromSwift :: FFIArgLit a -> IO a
 
 data ForeignValKind = JSONKind | PtrKind
@@ -42,8 +33,6 @@ data ForeignValKind = JSONKind | PtrKind
 --------------------------------------------------------------------------------
 
 -- | Derive a @'ToSwift'@ and @'FromSwift'@ instance.
---
--- In the case of deriving with @'JSONKind'@, a JSON instance will be derived if one isn't found.
 swiftMarshal :: ForeignValKind -> TH.Name -> TH.Q [TH.Dec]
 swiftMarshal kind name = do
   let newty = case kind of
@@ -54,6 +43,8 @@ swiftMarshal kind name = do
   satTy <- getSaturatedType name
 
   when (kind == JSONKind) $ do
+    -- Ensure there's a MoatType instance (helping ensure the datatypes were
+    -- yielded to .swift files)
     hasMoatTy <- TH.isInstance ''ToMoatType [satTy]
     when (not hasMoatTy) $ do
       fail $
@@ -133,3 +124,5 @@ instance FromSwift (PtrMarshal a) where
 -- Lists
 deriving via (JSONMarshal [a]) instance ToJSON a => ToSwift [a]
 deriving via (JSONMarshal [a]) instance FromJSON a => FromSwift [a]
+
+

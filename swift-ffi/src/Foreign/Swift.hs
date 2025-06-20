@@ -26,11 +26,12 @@ import Control.Monad
 import Data.ByteString.Unsafe
 import Foreign.Storable
 
+import GHC.Tc.Gen.Splice () -- Quasi TcM
+
 import GHC.Core.FamInstEnv
 import GHC.Tc.Utils.Monad (TcM, TcLclEnv (..))
 import Unsafe.Coerce (unsafeCoerce)
 import qualified GHC.Tc.Instance.Family as TcM
-import GHC.Driver.Ppr (showPprUnsafe)
 import GHC.ThToHs (convertToHsType)
 import GHC.Types.SrcLoc (generatedSrcSpan)
 import GHC.Types.Basic (DoPmc(DoPmc), GenReason (OtherExpansion), Origin (Generated))
@@ -50,7 +51,6 @@ import GHC.Core.Reduction (Reduction(..))
 import GHC.Types.Name (getOccString)
 import qualified GHC.Tc.Utils.Monad as TcM
 import Data.IORef
-
 
 -- | Export a Haskell function to be called by Swift.
 --
@@ -114,8 +114,6 @@ foreignExportSwift fun_name = do
   wrapperVars <- mapM (const $ newName "wrap")
                   [1..wrapperTyArity]
 
-  runIO $ print (orgVars, wrapperVars, showPprUnsafe normalized_ty)
-
   fun <- FunD wrapper_name . (:[]) . (\b -> Clause (map VarP wrapperVars) (NormalB b) []) . DoE Nothing <$> do
     buildBodyWithArgs wrapperVars $ do
       binds <- zipWithM decodeArg orgVars origArgsTy
@@ -123,7 +121,10 @@ foreignExportSwift fun_name = do
           resultBind = BindS (VarP callresult_name) applyF
       final <- encodeRes origResTy callresult_name
       return (binds++[resultBind]++[NoBindS final])
-  return [fsig, fun, fexp]
+
+  ann <- AnnP (ValueAnnotation fun_name) <$> [| ExportSwiftFunction |]
+
+  return [PragmaD ann, fsig, fun, fexp]
 
 --------------------------------------------------------------------------------
 -- Foreign-wrapper builder monad
