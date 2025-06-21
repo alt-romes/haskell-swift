@@ -61,7 +61,9 @@ import qualified GHC.Tc.Utils.Monad as TcM
 import qualified GHC.Tc.Utils.TcType as Core
 import qualified GHC.Types.Name.Occurrence as NameSpace
 import qualified GHC.Unit.Env as HUG
+#if __GLASGOW_HASKELL__ >= 913
 import qualified GHC.Unit.Home.Graph as HUG
+#endif
 import qualified Language.Haskell.TH as TH (Name)
 
 data SwiftExport = ExportSwiftData (String {- tycon name -})
@@ -94,10 +96,9 @@ typeCheckAct ms g = do
 yieldSwiftCode :: ModGuts -> CoreM ModGuts
 yieldSwiftCode g@ModGuts{..} = do
   hsc_env <- getHscEnv
-  let logger = hsc_logger hsc_env
 
   case ghcLink $ hsc_dflags hsc_env of
-    -- Only run the plugin if the backend is not interpreter (to make sure we don't loop by calling load again; also useful for repl)
+    -- Only run the plugin if the backend is not interpreter (useful for repl whose CWD is typically with HLS the project root)
     LinkInMemory -> return g
     _ -> do
 
@@ -105,43 +106,7 @@ yieldSwiftCode g@ModGuts{..} = do
 
       -- Run things within a Ghc monad using the current HscEnv as the base
       liftIO $ GHC.runGhc Nothing $ do
-        GHC.setSession hsc_env -- (set current env)
-
-        -- let tidy_occ_env = initTidyOccEnv [occName exprId]
-        -- let tidy_env     = mkEmptyTidyEnv tidy_occ_env
-        -- let tidy_expr    = tidyExpr tidy_env expr
-
-        {- Prepare for codegen -}
-        -- cp_cfg :: IO <- initCorePrepConfig hsc_env
-        -- prepd_expr :: IO <- corePrepExpr
-        --  logger cp_cfg
-        --  tidy_expr
-        --
-        -- let (stg_binds0,_,_) = coreToStg (initCoreToStgOpts dflags) this_mod undefined [NonRec exprId expr]
-        -- (stg_binds1,_) <- stg2stg (hsc_logger hsc_env) (interactiveInScope (hsc_IC hsc_env)) (initStgPipelineOpts dflags True) this_mod stg_binds0
-        -- let (stg_binds, _stg_deps) = unzip stg_binds1
-        --
-        -- bcos <- byteCodeGen hsc_env this_mod stg_binds [] Nothing modbreaks []
-        --
-        -- bco_time <- getCurrentTime
-        -- (fv_hvs, mods_needed, units_needed) <- loadDecls interp hsc_env noSrcSpan $ Linkable bco_time this_mod $ NE.singleton $ BCOs bcos
-        -- let Just fval = (lookup (idName exprId) fv_hvs)
-        --
-
-        -- To run the generation code use the same flags as before, but set
-        -- interpreted mode (this also means we won't recursively run the
-        -- plugin while trying to load the code)
-        -- dflags0 <- GHC.getSessionDynFlags
-        -- let dflags' = dflags0 { backend = GHC.interpreterBackend, ghcLink = LinkInMemory }
-        -- _ <- GHC.setSessionDynFlags dflags'
-
-        liftIO $ putStrLn "REGENERATING...."
-        -- TODO: This forces everything to be recompiled a second time... can't we do better?
-        -- _ <- GHC.load GHC.LoadAllTargets -- (Targets were already set in the hsc_env)
-
-        -- old_hmi <- liftIO $ HUG.lookupHugByModule mg_module (hsc_HUG hsc_env)
-        -- hmi <- liftIO $ compileOne (hsc_env{hsc_plugins=emptyPlugins, hsc_dflags=dflags'{pluginModNames=[], pluginModNameOpts=[], externalPluginSpecs=[]}}) modsum 0 1 (hm_iface <$> old_hmi) (maybe emptyHomeModInfoLinkable hm_linkable old_hmi)
-        -- liftIO $ hscInsertHPT hmi hsc_env
+        GHC.setSession hsc_env
 
         modsum <- GHC.getModSummary mg_module
         (cgguts, details) <- liftIO $ hscTidy hsc_env g
@@ -149,7 +114,6 @@ yieldSwiftCode g@ModGuts{..} = do
         !partial_iface <- liftIO $ mkPartialIface hsc_env mg_binds details modsum [] g
         final_iface <- liftIO $ mkFullIface hsc_env partial_iface Nothing Nothing NoStubs []
 
-        -- hscMaybeWriteIface logger dflags True final_iface mb_old_iface_hash location
         bc <- liftIO $ generateFreshByteCode hsc_env (moduleName mg_module) (mkCgInteractiveGuts cgguts) (error "todo: no mod_location")
 
         let iface = final_iface
@@ -167,95 +131,21 @@ yieldSwiftCode g@ModGuts{..} = do
                   , bco <- linkableBCOs linkable
                   , spt <- bc_spt_entries bco
                   ]
-        pprTraceM "linkable'" (ppr linkable')
         liftIO $ HUG.addHomeModInfoToHug hmi (hsc_HUG hsc_env)
 
         -- Import module, making sure top binds are in scope on eval
         _ <- setContext [ IIDecl $ GHC.simpleImportDecl (moduleName mg_module) ]
-        liftIO $ putStrLn "LOADED OK...."
 
         -- Restore after having loaded using LinkInMemory?!
         forM_ (nonDetUFMToList anns) $ \case
           (uq, _exportType :: SwiftExport) -> do
             let ids = bindersOfBinds mg_binds
-            let Just genId = List.find (\x -> uq == getUnique x) ids
-            liftIO $ putStrLn "Generating..."
+                Just genId = List.find (\x -> uq == getUnique x) ids
             -- It would be cooler to use something like evalIO directly, but
             -- simply print out the Id as a string and interpret that as a
             -- string variable occurrence.
-            pprTraceM "SHOW LOADER STATE" =<< liftIO (showLoaderState (hscInterp hsc_env))
-            -- pprTraceM "ccguts" (ppr $ cg_binds cgguts)
-            _ <- execStmt (showPprUnsafe genId) execOptions
-            liftIO $ putStrLn "Done"
+            execStmt (showPprUnsafe genId) execOptions
       return g
-
-lookupInstance :: ModGuts -> Core.Class -> Core.Type -> CoreM (Maybe ClsInst)
-lookupInstance ModGuts{mg_insts, mg_inst_env} cls ty = do
-  eps <- liftIO =<< hscEPS <$> getHscEnv
-  let instEnvs = InstEnvs { ie_global  = eps_inst_env eps
-                          , ie_local   = mg_inst_env
-                          , ie_visible = mempty }
-  return $ case lookupInstEnv False instEnvs cls [ty] of
-    (map fst -> matches, _, _) -> case matches of
-      [] -> List.find (\ClsInst{is_tys=headTy:_,is_cls} -> ty `eqType` headTy && is_cls == cls) mg_insts :: Maybe ClsInst
-      x:_ -> Just x
-
-lookupFunctionId :: GlobalRdrEnv -> String -> CoreM Id
-lookupFunctionId g s = lookupOcc NameSpace.varName g s >>= \case
-  Nothing -> error $ "Id " ++ s ++ " not found in GRE " ++ showPprUnsafe g
-  Just name -> lookupId name
-
--- | Find the TyCon by the given occurrence String, then construct a Type from
--- saturating that TyCon to as many type variables as necessary.
-lookupTypeByName :: GlobalRdrEnv -> String -> CoreM (Maybe Core.Type)
-lookupTypeByName gre occStr = do
-  lookupOcc tcName gre occStr >>= \case
-    Nothing -> pure Nothing
-    Just name ->
-      lookupThing name >>= \case
-        ATyCon tc ->
-          pure . Just =<< saturateTyConApp tc
-        _ -> error "lookupTypeByName"
-
-saturateTyConApp :: TyCon -> CoreM Core.Type
-saturateTyConApp tc = do
-  let arity = tyConArity tc
-  uniqs <- take arity <$> getUniquesM
-  let dummyVars = mkTyVarTys
-        [ mkTyVar name liftedTypeKind
-        | (i :: Int, uq) <- zip [1..] uniqs
-        , let name = mkInternalName uq (mkTyVarOcc ("a" ++ show i)) noSrcSpan
-        ]
-  return $ mkTyConApp tc dummyVars
-
-lookupOcc :: GHC.Plugins.NameSpace -> GlobalRdrEnv -> String -> CoreM (Maybe Name)
-lookupOcc ns gre occStr =
-  let occ = GHC.Plugins.mkOccName ns occStr
-      elts = lookupGRE gre (LookupOccName occ SameNameSpace)
-  in case elts of
-      [] -> pure Nothing
-      (r:_) -> do
-        let name = gre_name r -- Take the first match
-        pure (Just name)
-
-getProxyDataCon :: GlobalRdrEnv -> CoreM Id
-getProxyDataCon mg_rdr_env =
-  lookupOcc dataName mg_rdr_env "Proxy" >>= \case
-    Nothing -> error "Proxy datacon is not in scope, please import it:\n\nimport Data.Proxy (Proxy(..))\n\nIt should have been re-exported from Foreign.Swift.*!"
-    Just thing -> lookupThing thing >>= \case
-      AConLike (RealDataCon cl)
-        -> pure $ dataConWorkId cl
-      _ -> error "unexpected"
-
-getToMoatTypeCls :: GlobalRdrEnv -> CoreM Core.Class
-getToMoatTypeCls mg_rdr_env =
-  lookupOcc clsName mg_rdr_env "ToMoatType" >>= \case
-    Nothing -> error "ToMoatType tycon is not in scope, please import it:\n\n    import Moat\n\nIt should have been re-exported from Foreign.Swift.*!"
-    Just n -> lookupThing n >>= \case
-      ATyCon tc -> case tyConClass_maybe tc of
-        Nothing -> error "expected class"
-        Just cl -> return cl
-      _ -> error "unexpected"
 
 --------------------------------------------------------------------------------
 -- * Types / Data
