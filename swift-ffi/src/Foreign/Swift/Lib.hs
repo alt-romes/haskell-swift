@@ -18,33 +18,22 @@ module Foreign.Swift.Lib
   , Proxy(..), ToMoatType
   ) where
 
-import GHC.Iface.Make
 import Control.Exception
 import GHC.Utils.Trace
 import GHC.Linker.Loader
-import GHC.Unit.Module.ModDetails
-import GHC.Unit.Finder
-import GHC.Types.ForeignStubs
 import Control.Monad
 import GHC
 import Data.Data (Data)
 import Data.List (intersperse)
-import Data.Maybe
 import Data.Proxy (Proxy(..))
-import GHC.ByteCode.Types
 import GHC.Core.ConLike (ConLike(..))
 import GHC.Core.InstEnv
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Driver.Env
-import GHC.Driver.Main hiding (getHscEnv)
-import GHC.Linker.Types
 import GHC.Plugins
-import GHC.Runtime.Context (InteractiveImport(..))
-import GHC.Runtime.Eval
 import GHC.Tc.Utils.Monad (TcM, TcGblEnv)
-import GHC.Types.TyThing (MonadThings(..), TyThing (..))
+import GHC.Types.TyThing (MonadThings(..))
 import GHC.Unit.External
-import GHC.Unit.Home.ModInfo
 import Language.Haskell.TH as TH hiding (Name, ppr)
 import Language.Haskell.TH.Syntax (Lift (..))
 import Moat
@@ -54,13 +43,10 @@ import System.IO.Error
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.TH as Aeson
 import qualified Data.List as List
-import qualified GHC
 import qualified GHC.Core.Class as Core
 import qualified GHC.Tc.Utils.Monad as TcM
 import qualified GHC.Tc.Utils.TcType as Core
 import qualified GHC.Types.Name.Occurrence as NameSpace
-import qualified GHC.Unit.Env as HUG
-import qualified GHC.Unit.Home.Graph as HUG
 import qualified Language.Haskell.TH as TH (Name)
 
 data SwiftExport = ExportSwiftData (String {- tycon name -})
@@ -96,106 +82,34 @@ yieldSwiftCode g@ModGuts{..} = do
   let logger = hsc_logger hsc_env
 
   case ghcLink $ hsc_dflags hsc_env of
-    -- Only run the plugin if the backend is not interpreter (to make sure we don't loop by calling load again; also useful for repl)
+    -- Only run the plugin if the backend is not interpreter (useful for repl?)
     LinkInMemory -> return g
     _ -> do
 
       (_, anns) <- getFirstAnnotations deserializeWithData g
 
-      -- Run things within a Ghc monad using the current HscEnv as the base
-      liftIO $ GHC.runGhc Nothing $ do
-        GHC.setSession hsc_env -- (set current env)
+      let modPath = buildDir </> moduleNameSlashes (moduleName mg_module) <.> "hs"
 
-        -- let tidy_occ_env = initTidyOccEnv [occName exprId]
-        -- let tidy_env     = mkEmptyTidyEnv tidy_occ_env
-        -- let tidy_expr    = tidyExpr tidy_env expr
+      -- We tried to evaluate the expressions directly as bytecode, but that
+      -- just wasn't working out (see commit history).
+      -- Just write them all to a Haskell module which gets built and run at install time
+      removeFile' modPath
+      liftIO $ createDirectoryIfMissing True (takeDirectory modPath)
+      liftIO $ writeFile modPath $ unlines
+        [ "module Main where"
+        , "import " ++ moduleNameString (moduleName mg_module)
+        , ""
+        , "main :: IO"
+        , "main = do"
+        ]
 
-        {- Prepare for codegen -}
-        -- cp_cfg :: IO <- initCorePrepConfig hsc_env
-        -- prepd_expr :: IO <- corePrepExpr
-        --  logger cp_cfg
-        --  tidy_expr
-        --
-        -- let (stg_binds0,_,_) = coreToStg (initCoreToStgOpts dflags) this_mod undefined [NonRec exprId expr]
-        -- (stg_binds1,_) <- stg2stg (hsc_logger hsc_env) (interactiveInScope (hsc_IC hsc_env)) (initStgPipelineOpts dflags True) this_mod stg_binds0
-        -- let (stg_binds, _stg_deps) = unzip stg_binds1
-        --
-        -- bcos <- byteCodeGen hsc_env this_mod stg_binds [] Nothing modbreaks []
-        --
-        -- bco_time <- getCurrentTime
-        -- (fv_hvs, mods_needed, units_needed) <- loadDecls interp hsc_env noSrcSpan $ Linkable bco_time this_mod $ NE.singleton $ BCOs bcos
-        -- let Just fval = (lookup (idName exprId) fv_hvs)
-        --
+      forM_ (nonDetUFMToList anns) $ \case
+        (uq, _exportType :: SwiftExport) -> do
+          let ids = bindersOfBinds mg_binds
+              Just genId = List.find (\x -> uq == getUnique x) ids
+              genFunStr = showPprUnsafe genId
+          liftIO $ appendFile modPath ("  " ++ genFunStr)
 
-        -- To run the generation code use the same flags as before, but set
-        -- interpreted mode (this also means we won't recursively run the
-        -- plugin while trying to load the code)
-        -- dflags0 <- GHC.getSessionDynFlags
-        -- let dflags' = dflags0 { backend = GHC.interpreterBackend, ghcLink = LinkInMemory }
-        -- _ <- GHC.setSessionDynFlags dflags'
-
-        liftIO $ putStrLn "REGENERATING...."
-        -- TODO: This forces everything to be recompiled a second time... can't we do better?
-        -- _ <- GHC.load GHC.LoadAllTargets -- (Targets were already set in the hsc_env)
-
-        -- old_hmi <- liftIO $ HUG.lookupHugByModule mg_module (hsc_HUG hsc_env)
-        -- hmi <- liftIO $ compileOne (hsc_env{hsc_plugins=emptyPlugins, hsc_dflags=dflags'{pluginModNames=[], pluginModNameOpts=[], externalPluginSpecs=[]}}) modsum 0 1 (hm_iface <$> old_hmi) (maybe emptyHomeModInfoLinkable hm_linkable old_hmi)
-        -- liftIO $ hscInsertHPT hmi hsc_env
-
-        modsum <- GHC.getModSummary mg_module
-        (cgguts, details) <- liftIO $ hscTidy hsc_env g
-
-        !partial_iface <- liftIO $ mkPartialIface hsc_env mg_binds details modsum [] g
-        final_iface <- liftIO $ mkFullIface hsc_env partial_iface Nothing Nothing NoStubs []
-
-        -- hscMaybeWriteIface logger dflags True final_iface mb_old_iface_hash location
-        bc <- liftIO $ generateFreshByteCode hsc_env (moduleName mg_module) (mkCgInteractiveGuts cgguts) (error "todo: no mod_location")
-
-        let iface = final_iface
-            linkable = emptyHomeModInfoLinkable { homeMod_bytecode = Just bc }
-
-        -- details <- liftIO $ genModDetails hsc_env iface
-        -- mb_object <- liftIO $ findObjectLinkableMaybe (mi_module iface) undefined
-        -- mb_bytecode <- liftIO $ loadIfaceByteCodeLazy hsc_env iface undefined (md_types details)
-        -- let hm_linkable = HomeModLinkable mb_bytecode mb_object
-        -- let hmi =  (HomeModInfo iface details hm_linkable)
-
-        details <- liftIO $ initModDetails hsc_env iface
-        linkable' <- liftIO $ traverse (initWholeCoreBindings hsc_env iface details) (homeMod_bytecode linkable)
-        let hmi = HomeModInfo iface details (linkable { homeMod_bytecode = linkable' })
-        liftIO $ hscAddSptEntries hsc_env
-                  [ spt
-                  | linkable <- maybeToList (homeModInfoByteCode hmi)
-                  , bco <- linkableBCOs linkable
-                  , spt <- bc_spt_entries bco
-                  ]
-        liftIO $ HUG.addHomeModInfoToHug hmi (hsc_HUG hsc_env)
-
-        -- mb_bytecode <- liftIO $ loadIfaceByteCodeLazy hsc_env iface undefined (md_types details)
-        -- let hm_linkable = HomeModLinkable mb_bytecode Nothing
-        pprTraceM "doing load decls" =<< liftIO (showLoaderState (hscInterp hsc_env))
-        liftIO $ loadDecls (hscInterp hsc_env) hsc_env noSrcSpan (fromJust $ homeModInfoByteCode hmi)
-
-        -- pprTraceM "doing load decls" =<< liftIO (showLoaderState (hscInterp hsc_env))
-        -- liftIO $ loadDecls (hscInterp hsc_env) hsc_env noSrcSpan (fromJust linkable')
-        -- pprTraceM "did load decls" =<< liftIO (showLoaderState (hscInterp hsc_env))
-
-        -- Import module, making sure top binds are in scope on eval
-        _ <- setContext [ IIDecl $ GHC.simpleImportDecl (moduleName mg_module) ]
-        liftIO $ putStrLn "LOADED OK...."
-
-        -- Restore after having loaded using LinkInMemory?!
-        forM_ (nonDetUFMToList anns) $ \case
-          (uq, _exportType :: SwiftExport) -> do
-            let ids = bindersOfBinds mg_binds
-            let Just genId = List.find (\x -> uq == getUnique x) ids
-            liftIO $ putStrLn "Generating..."
-            -- It would be cooler to use something like evalIO directly, but
-            -- simply print out the Id as a string and interpret that as a
-            -- string variable occurrence.
-            pprTraceM "SHOW LOADER STATE" =<< liftIO (showLoaderState (hscInterp hsc_env))
-            _ <- execStmt (showPprUnsafe genId) execOptions
-            liftIO $ putStrLn "Done"
       return g
 
 lookupInstance :: ModGuts -> Core.Class -> Core.Type -> CoreM (Maybe ClsInst)
@@ -265,6 +179,12 @@ getToMoatTypeCls mg_rdr_env =
         Nothing -> error "expected class"
         Just cl -> return cl
       _ -> error "unexpected"
+
+
+removeFile' :: TcM.MonadIO m => FilePath -> m ()
+removeFile' loc = liftIO $
+  removeFile loc `catch ` \case e | isDoesNotExistError e -> pure ()
+                                  | otherwise -> throwIO e
 
 --------------------------------------------------------------------------------
 -- * Types / Data
@@ -389,13 +309,11 @@ yieldFunction prx name = do
 -- | Yield an expression which will yield a piece of code to the current module being generated.
 outputCode :: Q Exp -> Q Exp
 outputCode produceCode = do
-  loc <- (buildDir </>) . locToFile . loc_module <$> location
+  loc <- (buildDir </>) . modSwiftLoc . loc_module <$> location
 
   -- When this splice runs (rather than when the produced expression is run)
   -- reset the files written by it
-  runIO $
-    removeFile loc `catch ` \case e | isDoesNotExistError e -> pure ()
-                                    | otherwise -> throwIO e
+  runIO $ removeFile' loc
   [| do
 
       -- When mod is finalizer, write all swift code to file from scratch
@@ -410,8 +328,8 @@ buildDir :: FilePath
 buildDir = "_build"
 
 -- | Convert a module's 'Location' into the relative path to the Swift file we're writing
-locToFile :: String -> FilePath
-locToFile l = map (\case '.' -> '/'; x -> x) l <.> "swift"
+modSwiftLoc :: String -> FilePath
+modSwiftLoc l = map (\case '.' -> '/'; x -> x) l <.> "swift"
 
 generateSwiftCode :: ToMoatData a => Proxy a -> String
 generateSwiftCode = prettySwiftData . toMoatData
