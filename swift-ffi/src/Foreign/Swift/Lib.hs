@@ -18,39 +18,50 @@ module Foreign.Swift.Lib
   , Proxy(..), ToMoatType
   ) where
 
+import GHC.Iface.Make
+import Control.Exception
+import GHC.Utils.Trace
+import GHC.Linker.Loader
+import GHC.Unit.Module.ModDetails
+import GHC.Unit.Finder
+import GHC.Types.ForeignStubs
+import Control.Monad
+import GHC
+import Data.Data (Data)
+import Data.List (intersperse)
+import Data.Maybe
+import Data.Proxy (Proxy(..))
+import GHC.ByteCode.Types
+import GHC.Core.ConLike (ConLike(..))
+import GHC.Core.InstEnv
+import GHC.Core.TyCo.Compare (eqType)
+import GHC.Driver.Env
+import GHC.Driver.Main hiding (getHscEnv)
+import GHC.Linker.Types
+import GHC.Plugins
+import GHC.Runtime.Context (InteractiveImport(..))
+import GHC.Runtime.Eval
+import GHC.Tc.Utils.Monad (TcM, TcGblEnv)
+import GHC.Types.TyThing (MonadThings(..), TyThing (..))
+import GHC.Unit.External
+import GHC.Unit.Home.ModInfo
+import Language.Haskell.TH as TH hiding (Name, ppr)
+import Language.Haskell.TH.Syntax (Lift (..))
+import Moat
+import System.Directory
+import System.FilePath
+import System.IO.Error
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.TH as Aeson
-import Language.Haskell.TH as TH hiding (Name, ppr)
-import qualified Language.Haskell.TH as TH (Name)
-import Moat
-import Data.Proxy (Proxy(..))
-
-import System.FilePath
-import System.Directory
-import Control.Exception
-import System.IO.Error
-
-import Data.List (intersperse)
-import Control.Monad
-import Data.Data (Data)
-
-import GHC.Plugins
-import GHC.Types.TyThing (MonadThings(..), TyThing (..))
-import qualified GHC.Tc.Utils.TcType as Core
 import qualified Data.List as List
-import qualified GHC.Types.Name.Occurrence as NameSpace
-import GHC.Core.InstEnv
-import GHC.Core.ConLike (ConLike(..))
-import GHC.Unit.External
-import GHC.Core.TyCo.Compare (eqType)
-import qualified GHC.Core.Class as Core
-import Language.Haskell.TH.Syntax (Lift (..))
-import GHC.Tc.Utils.Monad (TcM, TcGblEnv)
-import qualified GHC.Tc.Utils.Monad as TcM
 import qualified GHC
-import GHC.Runtime.Eval
-import GHC.Runtime.Context (InteractiveImport(..))
+import qualified GHC.Core.Class as Core
+import qualified GHC.Tc.Utils.Monad as TcM
+import qualified GHC.Tc.Utils.TcType as Core
+import qualified GHC.Types.Name.Occurrence as NameSpace
 import qualified GHC.Unit.Env as HUG
+import qualified GHC.Unit.Home.Graph as HUG
+import qualified Language.Haskell.TH as TH (Name)
 
 data SwiftExport = ExportSwiftData (String {- tycon name -})
                  | ExportSwiftFunction
@@ -82,6 +93,7 @@ typeCheckAct ms g = do
 yieldSwiftCode :: ModGuts -> CoreM ModGuts
 yieldSwiftCode g@ModGuts{..} = do
   hsc_env <- getHscEnv
+  let logger = hsc_logger hsc_env
 
   case ghcLink $ hsc_dflags hsc_env of
     -- Only run the plugin if the backend is not interpreter (to make sure we don't loop by calling load again; also useful for repl)
@@ -94,18 +106,82 @@ yieldSwiftCode g@ModGuts{..} = do
       liftIO $ GHC.runGhc Nothing $ do
         GHC.setSession hsc_env -- (set current env)
 
+        -- let tidy_occ_env = initTidyOccEnv [occName exprId]
+        -- let tidy_env     = mkEmptyTidyEnv tidy_occ_env
+        -- let tidy_expr    = tidyExpr tidy_env expr
+
+        {- Prepare for codegen -}
+        -- cp_cfg :: IO <- initCorePrepConfig hsc_env
+        -- prepd_expr :: IO <- corePrepExpr
+        --  logger cp_cfg
+        --  tidy_expr
+        --
+        -- let (stg_binds0,_,_) = coreToStg (initCoreToStgOpts dflags) this_mod undefined [NonRec exprId expr]
+        -- (stg_binds1,_) <- stg2stg (hsc_logger hsc_env) (interactiveInScope (hsc_IC hsc_env)) (initStgPipelineOpts dflags True) this_mod stg_binds0
+        -- let (stg_binds, _stg_deps) = unzip stg_binds1
+        --
+        -- bcos <- byteCodeGen hsc_env this_mod stg_binds [] Nothing modbreaks []
+        --
+        -- bco_time <- getCurrentTime
+        -- (fv_hvs, mods_needed, units_needed) <- loadDecls interp hsc_env noSrcSpan $ Linkable bco_time this_mod $ NE.singleton $ BCOs bcos
+        -- let Just fval = (lookup (idName exprId) fv_hvs)
+        --
+
         -- To run the generation code use the same flags as before, but set
         -- interpreted mode (this also means we won't recursively run the
         -- plugin while trying to load the code)
-        dflags0 <- GHC.getSessionDynFlags
-        let dflags' = dflags0 { backend = GHC.interpreterBackend, ghcLink = LinkInMemory }
-        _ <- GHC.setSessionDynFlags dflags'
+        -- dflags0 <- GHC.getSessionDynFlags
+        -- let dflags' = dflags0 { backend = GHC.interpreterBackend, ghcLink = LinkInMemory }
+        -- _ <- GHC.setSessionDynFlags dflags'
 
         liftIO $ putStrLn "REGENERATING...."
         -- TODO: This forces everything to be recompiled a second time... can't we do better?
-        _ <- GHC.load GHC.LoadAllTargets -- (Targets were already set in the hsc_env)
+        -- _ <- GHC.load GHC.LoadAllTargets -- (Targets were already set in the hsc_env)
 
-        _ <- setContext [ IIDecl $ GHC.simpleImportDecl (moduleName mg_module) ] -- Import this mod at the top
+        -- old_hmi <- liftIO $ HUG.lookupHugByModule mg_module (hsc_HUG hsc_env)
+        -- hmi <- liftIO $ compileOne (hsc_env{hsc_plugins=emptyPlugins, hsc_dflags=dflags'{pluginModNames=[], pluginModNameOpts=[], externalPluginSpecs=[]}}) modsum 0 1 (hm_iface <$> old_hmi) (maybe emptyHomeModInfoLinkable hm_linkable old_hmi)
+        -- liftIO $ hscInsertHPT hmi hsc_env
+
+        modsum <- GHC.getModSummary mg_module
+        (cgguts, details) <- liftIO $ hscTidy hsc_env g
+
+        !partial_iface <- liftIO $ mkPartialIface hsc_env mg_binds details modsum [] g
+        final_iface <- liftIO $ mkFullIface hsc_env partial_iface Nothing Nothing NoStubs []
+
+        -- hscMaybeWriteIface logger dflags True final_iface mb_old_iface_hash location
+        bc <- liftIO $ generateFreshByteCode hsc_env (moduleName mg_module) (mkCgInteractiveGuts cgguts) (error "todo: no mod_location")
+
+        let iface = final_iface
+            linkable = emptyHomeModInfoLinkable { homeMod_bytecode = Just bc }
+
+        -- details <- liftIO $ genModDetails hsc_env iface
+        -- mb_object <- liftIO $ findObjectLinkableMaybe (mi_module iface) undefined
+        -- mb_bytecode <- liftIO $ loadIfaceByteCodeLazy hsc_env iface undefined (md_types details)
+        -- let hm_linkable = HomeModLinkable mb_bytecode mb_object
+        -- let hmi =  (HomeModInfo iface details hm_linkable)
+
+        details <- liftIO $ initModDetails hsc_env iface
+        linkable' <- liftIO $ traverse (initWholeCoreBindings hsc_env iface details) (homeMod_bytecode linkable)
+        let hmi = HomeModInfo iface details (linkable { homeMod_bytecode = linkable' })
+        liftIO $ hscAddSptEntries hsc_env
+                  [ spt
+                  | linkable <- maybeToList (homeModInfoByteCode hmi)
+                  , bco <- linkableBCOs linkable
+                  , spt <- bc_spt_entries bco
+                  ]
+        liftIO $ HUG.addHomeModInfoToHug hmi (hsc_HUG hsc_env)
+
+        -- mb_bytecode <- liftIO $ loadIfaceByteCodeLazy hsc_env iface undefined (md_types details)
+        -- let hm_linkable = HomeModLinkable mb_bytecode Nothing
+        pprTraceM "doing load decls" =<< liftIO (showLoaderState (hscInterp hsc_env))
+        liftIO $ loadDecls (hscInterp hsc_env) hsc_env noSrcSpan (fromJust $ homeModInfoByteCode hmi)
+
+        -- pprTraceM "doing load decls" =<< liftIO (showLoaderState (hscInterp hsc_env))
+        -- liftIO $ loadDecls (hscInterp hsc_env) hsc_env noSrcSpan (fromJust linkable')
+        -- pprTraceM "did load decls" =<< liftIO (showLoaderState (hscInterp hsc_env))
+
+        -- Import module, making sure top binds are in scope on eval
+        _ <- setContext [ IIDecl $ GHC.simpleImportDecl (moduleName mg_module) ]
         liftIO $ putStrLn "LOADED OK...."
 
         -- Restore after having loaded using LinkInMemory?!
@@ -117,6 +193,7 @@ yieldSwiftCode g@ModGuts{..} = do
             -- It would be cooler to use something like evalIO directly, but
             -- simply print out the Id as a string and interpret that as a
             -- string variable occurrence.
+            pprTraceM "SHOW LOADER STATE" =<< liftIO (showLoaderState (hscInterp hsc_env))
             _ <- execStmt (showPprUnsafe genId) execOptions
             liftIO $ putStrLn "Done"
       return g
@@ -269,7 +346,7 @@ genSwiftActionAndAnn yielding name ty exportAnn = do
   genName <- newName ("gen_swift_" ++ nameBase name)
   ann <- AnnP (ValueAnnotation genName) <$> unTypeCode exportAnn
   -- The generated function which outputs Swift code is going to be run by the plugin
-  genFunSig <- SigD genName <$> [t| IO () |]
+  genFunSig <- TH.SigD genName <$> [t| IO () |]
   genFunBody <- yielding [| Proxy @($(pure ty)) |] (nameBase genName)
   let genFun = FunD genName [Clause [] (NormalB genFunBody) []]
   return [genFun, genFunSig, PragmaD ann]

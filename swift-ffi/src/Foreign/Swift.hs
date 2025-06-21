@@ -272,7 +272,7 @@ normaliseTy ty = unsafeRunTcM $ do
   savedWanted <- liftIO $ readIORef tcl_lie
 
   env <- TcM.tcGetFamInstEnvs
-  case convertToHsType generatedOrigin generatedSrcSpan ty of
+  case convertToHsType mempty generatedOrigin generatedSrcSpan ty of
     Left _ -> fail "convertToHsType failed during swift-ffi normalisation"
     Right hsTyPs -> do
       (hsTyRn, _) <- rnLHsType (GenericCtx (Ppr.text "foreign.swift")) hsTyPs
