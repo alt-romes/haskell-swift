@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 -- | Produce a swift library by building a Haskell package using
@@ -35,21 +35,22 @@ import Control.Monad
 import Data.Data (Data)
 
 import GHC.Plugins
-import GHC.Utils.Trace
-import GHC.Types.TyThing (MonadThings(..), TyThing (..), tyThingId)
+import GHC.Types.TyThing (MonadThings(..), TyThing (..))
 import qualified GHC.Tc.Utils.TcType as Core
 import qualified Data.List as List
 import qualified GHC.Types.Name.Occurrence as NameSpace
-import GHC.Driver.Main (hscCompileCoreExpr)
-import qualified GHC.Core as Core
 import GHC.Core.InstEnv
-import GHC.Runtime.Interpreter
-import GHC.Driver.Config (initEvalOpts)
 import GHC.Core.ConLike (ConLike(..))
 import GHC.Unit.External
 import GHC.Core.TyCo.Compare (eqType)
 import qualified GHC.Core.Class as Core
 import Language.Haskell.TH.Syntax (Lift (..))
+import GHC.Tc.Utils.Monad (TcM, TcGblEnv)
+import qualified GHC.Tc.Utils.Monad as TcM
+import qualified GHC
+import GHC.Runtime.Eval
+import GHC.Runtime.Context (InteractiveImport(..))
+import qualified GHC.Unit.Env as HUG
 
 data SwiftExport = ExportSwiftData (String {- tycon name -})
                  | ExportSwiftFunction
@@ -65,41 +66,60 @@ instance Outputable SwiftExport where
 plugin :: Plugin
 plugin = defaultPlugin
   { installCoreToDos = \_ tds ->
-      return (CoreDoPluginPass "swift-ffi" yieldSwiftCode : tds) }
+      return (CoreDoPluginPass "swift-ffi" yieldSwiftCode : tds)
+  , typeCheckResultAction = \_ -> typeCheckAct }
+
+-- | The plugin will load expressions from this module, so it must be loaded
+typeCheckAct :: ModSummary -> TcGblEnv -> TcM TcGblEnv
+typeCheckAct ms g = do
+  env <- TcM.getTopEnv
+  -- pprTraceM "going to load" (empty)
+  -- -- _ <- loadModuleInterface (text "load module interface for runtime loading of bcos here") (ms_mod ms)
+  -- _ <- liftIO $ forceLoadModuleInterfaces env (text "load module interface for runtime loading of bcos here") [ms_mod ms]
+  -- pprTraceM "loaded load" (empty)
+  return g
 
 yieldSwiftCode :: ModGuts -> CoreM ModGuts
 yieldSwiftCode g@ModGuts{..} = do
   hsc_env <- getHscEnv
-  let modname = moduleNameString . moduleName $ mg_module
 
-  (_, anns) <- getFirstAnnotations deserializeWithData g
+  case ghcLink $ hsc_dflags hsc_env of
+    -- Only run the plugin if the backend is not interpreter (to make sure we don't loop by calling load again; also useful for repl)
+    LinkInMemory -> return g
+    _ -> do
 
-  -- yieldTypeId       <- lookupFunctionId mg_rdr_env "yieldType"
-  --
-  -- yieldFunctionId   <- lookupFunctionId mg_rdr_env "yieldFunction"
-  -- proxyDataCon      <- getProxyDataCon  mg_rdr_env
-  -- toMoatTypeCls     <- getToMoatTypeCls mg_rdr_env
-  --
-  -- let proxy ty    = Core.Var proxyDataCon `Core.App` Core.Type ty
-  --     getMoatTyInstDict ty = do
-  --       lookupInstance g toMoatTypeCls ty >>= \case
-  --         Just ClsInst{is_dfun} -> return is_dfun
-  --         Nothing -> error $ "MoatTyInst not found for " ++ showPprUnsafe ty
+      (_, anns) <- getFirstAnnotations deserializeWithData g
 
-  forM_ (nonDetUFMToList anns) $ \case
-    (uq, _exportType :: SwiftExport) -> do
-      let
-        bindsToIds (NonRec v _)   = [v]
-        bindsToIds (Rec    binds) = map fst binds
-        ids = concatMap bindsToIds mg_binds
+      -- Run things within a Ghc monad using the current HscEnv as the base
+      liftIO $ GHC.runGhc Nothing $ do
+        GHC.setSession hsc_env -- (set current env)
 
-      let Just genId = List.find (\x -> uq == getUnique x) ids
-      liftIO $ putStrLn "Generating..."
-      runCoreExpr (Var genId)
-      liftIO $ putStrLn "Done"
+        -- To run the generation code use the same flags as before, but set
+        -- interpreted mode (this also means we won't recursively run the
+        -- plugin while trying to load the code)
+        dflags0 <- GHC.getSessionDynFlags
+        let dflags' = dflags0 { backend = GHC.interpreterBackend, ghcLink = LinkInMemory }
+        _ <- GHC.setSessionDynFlags dflags'
 
+        liftIO $ putStrLn "REGENERATING...."
+        -- TODO: This forces everything to be recompiled a second time... can't we do better?
+        _ <- GHC.load GHC.LoadAllTargets -- (Targets were already set in the hsc_env)
 
-  return g
+        _ <- setContext [ IIDecl $ GHC.simpleImportDecl (moduleName mg_module) ] -- Import this mod at the top
+        liftIO $ putStrLn "LOADED OK...."
+
+        -- Restore after having loaded using LinkInMemory?!
+        forM_ (nonDetUFMToList anns) $ \case
+          (uq, _exportType :: SwiftExport) -> do
+            let ids = bindersOfBinds mg_binds
+            let Just genId = List.find (\x -> uq == getUnique x) ids
+            liftIO $ putStrLn "Generating..."
+            -- It would be cooler to use something like evalIO directly, but
+            -- simply print out the Id as a string and interpret that as a
+            -- string variable occurrence.
+            _ <- execStmt (showPprUnsafe genId) execOptions
+            liftIO $ putStrLn "Done"
+      return g
 
 lookupInstance :: ModGuts -> Core.Class -> Core.Type -> CoreM (Maybe ClsInst)
 lookupInstance ModGuts{mg_insts, mg_inst_env} cls ty = do
@@ -111,16 +131,6 @@ lookupInstance ModGuts{mg_insts, mg_inst_env} cls ty = do
     (map fst -> matches, _, _) -> case matches of
       [] -> List.find (\ClsInst{is_tys=headTy:_,is_cls} -> ty `eqType` headTy && is_cls == cls) mg_insts :: Maybe ClsInst
       x:_ -> Just x
-
-
--- | Interpret a CoreExpr and drop the result
-runCoreExpr :: CoreExpr -> CoreM ()
-runCoreExpr expr = do
-  hsc_env <- getHscEnv
-  pprTraceM "Evaluating expression..." (ppr expr)
-  (fval, _, _) <- liftIO $ hscCompileCoreExpr hsc_env noSrcSpan expr
-  _ <- liftIO $ evalStmt (hscInterp hsc_env) (initEvalOpts (hsc_dflags hsc_env) False) (EvalThis fval)
-  return ()
 
 lookupFunctionId :: GlobalRdrEnv -> String -> CoreM Id
 lookupFunctionId g s = lookupOcc NameSpace.varName g s >>= \case
@@ -210,7 +220,7 @@ swiftData name = do
   fromJSON <- if hasFromJSON then pure []
               else Aeson.deriveFromJSON Aeson.defaultOptions name
 
-  gens <- genSwiftActionAndAnn name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
+  gens <- genSwiftActionAndAnn yieldType name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
 
   return (mg ++ toJSON ++ fromJSON ++ gens)
 
@@ -218,12 +228,20 @@ swiftData name = do
 -- TODO: Support for types with type variables
 swiftPtr :: TH.Name -> Q [Dec]
 swiftPtr name = do
-  [d| instance ToMoatType $(conT name) where
+  kind <- reifyType name
+      -- As above
+  let tyVars (AppT a x) = a:tyVars x
+      tyVars _ret = []
+      tyUnits = map (\_ -> ConT ''()) (tyVars kind)
+      typWithUnits = foldl' AppT (ConT name) tyUnits
+  insts <- [d|
+      instance ToMoatType $(conT name) where
         toMoatType _ = Concrete
           { concreteName = $(lift $ nameBase name)
           , concreteTyVars = [{-todo-}] }
 
       instance ToMoatData $(conT name) where
+        -- todo: moat newtype?
         toMoatData _ = MoatAlias
           { aliasName = $(lift $ nameBase name)
           , aliasDoc = Nothing -- todo
@@ -231,25 +249,28 @@ swiftPtr name = do
           , aliasTyp = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
           }
     |]
+  gens <- genSwiftActionAndAnn yieldType name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
+  return (insts ++ gens)
 
 
 -- | Output a Swift datatype declaration to a file using the current module
 -- name as the filename.
 yieldType :: Q Exp -- ^ Proxy @ty expression
+          -> String -- gen name (ignored)
           -> Q Exp
-yieldType prx = do
-  outputCode [| generateSwiftCode $prx ++ "\n" |]
+yieldType prx _ = do
+  outputCode [| pure $ generateSwiftCode $prx ++ "\n" |]
 
 -- | Generate an IO action which, when run, will generate swift code and output
 -- it to a file.
 -- It also attaches an annotation pragma so the plugin can find this action and run it.
-genSwiftActionAndAnn :: TH.Name -> TH.Type -> Code Q SwiftExport -> Q [Dec]
-genSwiftActionAndAnn name ty exportAnn = do
+genSwiftActionAndAnn :: (Q Exp -> String -> Q Exp) -> TH.Name -> TH.Type -> Code Q SwiftExport -> Q [Dec]
+genSwiftActionAndAnn yielding name ty exportAnn = do
   genName <- newName ("gen_swift_" ++ nameBase name)
   ann <- AnnP (ValueAnnotation genName) <$> unTypeCode exportAnn
   -- The generated function which outputs Swift code is going to be run by the plugin
   genFunSig <- SigD genName <$> [t| IO () |]
-  genFunBody <- yieldFunction [| Proxy @($(pure ty)) |] (nameBase genName)
+  genFunBody <- yielding [| Proxy @($(pure ty)) |] (nameBase genName)
   let genFun = FunD genName [Clause [] (NormalB genFunBody) []]
   return [genFun, genFunSig, PragmaD ann]
 

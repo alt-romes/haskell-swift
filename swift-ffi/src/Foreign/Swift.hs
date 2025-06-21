@@ -122,7 +122,7 @@ foreignExportSwift fun_name = do
       final <- encodeRes origResTy callresult_name
       return (binds++[resultBind]++[NoBindS final])
 
-  gens <- genSwiftActionAndAnn fun_name (dropResultIO origin_ty) [|| ExportSwiftFunction ||]
+  gens <- genSwiftActionAndAnn yieldFunction fun_name (dropResultIO origin_ty) [|| ExportSwiftFunction ||]
 
   return ([fsig, fun, fexp] ++ gens)
 
