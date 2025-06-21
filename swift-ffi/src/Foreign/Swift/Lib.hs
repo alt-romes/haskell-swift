@@ -108,11 +108,20 @@ yieldSwiftCode g@ModGuts{..} = do
       liftIO $ GHC.runGhc Nothing $ do
         GHC.setSession hsc_env
 
+#if __GLASGOW_HASKELL__ >= 913
         modsum <- GHC.getModSummary mg_module
+#else
+        modsum <- GHC.getModSummary (moduleName mg_module)
+#endif
         (cgguts, details) <- liftIO $ hscTidy hsc_env g
 
+#if __GLASGOW_HASKELL__ >= 912
         !partial_iface <- liftIO $ mkPartialIface hsc_env mg_binds details modsum [] g
         final_iface <- liftIO $ mkFullIface hsc_env partial_iface Nothing Nothing NoStubs []
+#else
+        let !partial_iface = mkPartialIface hsc_env mg_binds details modsum g
+        final_iface <- liftIO $ mkFullIface hsc_env partial_iface Nothing Nothing
+#endif
 
         bc <- liftIO $ generateFreshByteCode hsc_env (moduleName mg_module) (mkCgInteractiveGuts cgguts) (error "todo: no mod_location")
 
@@ -123,15 +132,22 @@ yieldSwiftCode g@ModGuts{..} = do
         linkable0' <- liftIO $ traverse (initWholeCoreBindings hsc_env iface details) (homeMod_bytecode linkable)
         -- Drop foreign objects produced by foreign exports because for the
         -- interpreter we won't have the symbols it will try to resolve and fail
+#if __GLASGOW_HASKELL__ >= 912
         let linkable' = (\t -> t{linkableParts = NE.fromList $ NE.filter (\case DotO _ ForeignObject -> False;_ -> True) $ linkableParts t}) <$> linkable0'
         let hmi = HomeModInfo iface details (linkable { homeMod_bytecode = linkable' })
         liftIO $ hscAddSptEntries hsc_env
                   [ spt
                   | linkable <- maybeToList (homeModInfoByteCode hmi)
-                  , bco <- linkableBCOs linkable
+                  , bco <- byteCodeOfObject linkable
                   , spt <- bc_spt_entries bco
                   ]
         liftIO $ HUG.addHomeModInfoToHug hmi (hsc_HUG hsc_env)
+#else
+        -- For ghc9.10 just filter out ALL DotOs... not great but works for now and complex cases should use 9.14
+        let linkable' = (\t -> t{linkableUnlinked = filter (\case DotO _ -> False;_ -> True) $ linkableUnlinked t}) <$> linkable0'
+        let hmi = HomeModInfo iface details (linkable { homeMod_bytecode = linkable' })
+        setSession $ hscUpdateHPT (addHomeModInfoToHpt hmi) hsc_env
+#endif
 
         -- Import module, making sure top binds are in scope on eval
         _ <- setContext [ IIDecl $ GHC.simpleImportDecl (moduleName mg_module) ]
