@@ -220,7 +220,7 @@ swiftPtr name = do
           { aliasName = $(lift $ nameBase name)
           , aliasDoc = Nothing -- todo
           , aliasTyVars = [] -- todo
-          , aliasTyp = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
+          , aliasTyp = unsafeMutableRawPointerType
           }
     |]
   gens <- genSwiftActionAndAnn yieldType name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
@@ -253,18 +253,15 @@ genSwiftActionAndAnn yielding name ty exportAnn = do
 --------------------------------------------------------------------------------
 
 -- | Yield a Haskell function as Swift code wrapping a foreign call.
--- It also exports the function to the foreign interface
---
--- @
--- yieldFunction @(Query -> Int -> String) 'f [Just "x", Nothing] Proxy
--- @
-yieldFunction :: Q Exp  -- ^ Proxy @ty expr
-              -> String -- ^ Function name
+yieldFunction :: ([TH.Type], TH.Type) -- ^ The original type 
+              -> Q Exp  -- ^ Proxy @ty expr
+              -> String -- ^ Generated function name
               -> Q Exp
-yieldFunction prx name = do
+yieldFunction (origArgsTy, origResTy) prx name = do
   outputCode [|
     do
       let moatTy = toMoatType $prx
+          moatData = toMoatData $prx
           (argTys, retTy) = splitRetMoatTy ([], undefined) moatTy
           splitRetMoatTy (args, r) (Moat.App arg c) = splitRetMoatTy (arg:args, r) c
           splitRetMoatTy (args, _) ret = (reverse args, ret)
@@ -272,11 +269,16 @@ yieldFunction prx name = do
       swiftParams <- liftIO $ zipWithM prettyParam [1..] argTys
 
       return $ unlines
-        [ "@ForeignImportHaskell"
-        , "func " ++ $(litE $ StringL name) ++ "(cconv: HsCallJSON" ++ (if null swiftParams then "" else ", ") ++ concat (intersperse ", " swiftParams) ++ ")"
+        [ -- let's just do it inline rather than -- "@ForeignImportHaskell"
+          "public func " ++ $(litE $ StringL name) ++ "(" ++ concat (intersperse ", " swiftParams) ++ ")"
                   ++ " -> " ++ prettyMoatType retTy
-        , "{ stub() }"
+        , "{"
         ]
+        ++
+        [ "let hs_enc = JSONEncoder()" | not (null swiftParams) ]
+        [ "let hs_dec = JSONDecoder()" | MoatAlias <- retTy ]
+        ++
+        [ "}" ]
     |]
 
 --------------------------------------------------------------------------------
@@ -323,3 +325,5 @@ isOptional :: MoatType -> Bool
 isOptional (Optional _) = True
 isOptional _ = False
 
+unsafeMutableRawPointerType :: MoatType
+unsafeMutableRawPointerType = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }

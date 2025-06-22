@@ -97,7 +97,9 @@ foreignExportSwift fun_name = do
     fexp = ForeignD $ ExportF CCall wrapper_name_str wrapper_name foreign_ty
     fsig = SigD wrapper_name foreign_ty
 
-  let (wrapperArgsTy, _wrapperResTy) = tyFunSplitCoreTy normalized_ty
+  let
+      -- to make arg variables for the wrapper
+      (wrapperArgsTy, _wrapperResTy) = tyFunSplitCoreTy normalized_ty
       wrapperTyArity  = length wrapperArgsTy
 
       (origArgsTy, origResTy) = tyFunSplitTy origin_ty
@@ -122,7 +124,7 @@ foreignExportSwift fun_name = do
       final <- encodeRes origResTy callresult_name
       return (binds++[resultBind]++[NoBindS final])
 
-  gens <- genSwiftActionAndAnn yieldFunction fun_name (dropResultIO origin_ty) [|| ExportSwiftFunction ||]
+  gens <- genSwiftActionAndAnn (yieldFunction (origArgsTy, origResTy)) fun_name (dropResultIO origin_ty) [|| ExportSwiftFunction ||]
 
   return ([fsig, fun, fexp] ++ gens)
 
