@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -18,6 +19,7 @@ module Foreign.Swift.Lib
   , Proxy(..), ToMoatType
   ) where
 
+import Data.String.Interpolate
 import GHC.Iface.Make
 import qualified Data.List.NonEmpty as NE
 import Control.Exception
@@ -230,21 +232,20 @@ swiftPtr name = do
 -- | Output a Swift datatype declaration to a file using the current module
 -- name as the filename.
 yieldType :: Q Exp -- ^ Proxy @ty expression
-          -> String -- gen name (ignored)
           -> Q Exp
-yieldType prx _ = do
+yieldType prx = do
   outputCode [| pure $ generateSwiftCode $prx ++ "\n" |]
 
 -- | Generate an IO action which, when run, will generate swift code and output
 -- it to a file.
 -- It also attaches an annotation pragma so the plugin can find this action and run it.
-genSwiftActionAndAnn :: (Q Exp -> String -> Q Exp) -> TH.Name -> TH.Type -> Code Q SwiftExport -> Q [Dec]
+genSwiftActionAndAnn :: (Q Exp -> Q Exp) -> TH.Name -> TH.Type -> Code Q SwiftExport -> Q [Dec]
 genSwiftActionAndAnn yielding name ty exportAnn = do
   genName <- newName ("gen_swift_" ++ nameBase name)
   ann <- AnnP (ValueAnnotation genName) <$> unTypeCode exportAnn
   -- The generated function which outputs Swift code is going to be run by the plugin
   genFunSig <- TH.SigD genName <$> [t| IO () |]
-  genFunBody <- yielding [| Proxy @($(pure ty)) |] (nameBase genName)
+  genFunBody <- yielding [| Proxy @($(pure ty)) |]
   let genFun = FunD genName [Clause [] (NormalB genFunBody) []]
   return [genFun, genFunSig, PragmaD ann]
 
@@ -253,30 +254,56 @@ genSwiftActionAndAnn yielding name ty exportAnn = do
 --------------------------------------------------------------------------------
 
 -- | Yield a Haskell function as Swift code wrapping a foreign call.
-yieldFunction :: ([TH.Type], TH.Type) -- ^ The original type 
+yieldFunction :: ([TH.Type], TH.Type) -- ^ The original type (without return IO)
+              -> String -- ^ Original function name
+              -> String -- ^ Wrapper function name
               -> Q Exp  -- ^ Proxy @ty expr
-              -> String -- ^ Generated function name
               -> Q Exp
-yieldFunction (origArgsTy, origResTy) prx name = do
+yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
+  let mkHaskellCall :: [TH.Name{-acc fcall args names-}] -> [(String{-var name-}, TH.Type{-arg ty-})] -> Q Exp
+      -- Add argument
+      mkHaskellCall fcall_args_acc ((vn, argTy):xs) = do
+        let apx = [| Proxy @($(pure argTy)) |] :: Q Exp
+        call_args_name <- newName "call_args"
+        [| fromHaskell $apx (toMoatType $apx) $(lift vn) $ \ $(varP call_args_name) ->
+             $(mkHaskellCall (fcall_args_acc ++ [call_args_name]) xs)
+          |]
+
+      -- Finally, do the call and wrap result with fromHaskell call
+      mkHaskellCall fcall_args_acc [] = do
+        let respx = [| Proxy @($(pure origResTy)) |]
+        [| fromHaskell $respx (toMoatType $respx) "foreign_haskell_call_result" $ \res_extra_args ->
+             fcall ($(foldl (\acc n -> [| $acc ++ $n |]) [| [] |] (map varE fcall_args_acc)) ++ res_extra_args)
+          |]
+
   outputCode [|
     do
-      let moatTy = toMoatType $prx
-          moatData = toMoatData $prx
+      let moatTy = toMoatType $(prx)
+          -- moatData = toMoatData $(prx)
           (argTys, retTy) = splitRetMoatTy ([], undefined) moatTy
           splitRetMoatTy (args, r) (Moat.App arg c) = splitRetMoatTy (arg:args, r) c
           splitRetMoatTy (args, _) ret = (reverse args, ret)
 
-      swiftParams <- liftIO $ zipWithM prettyParam [1..] argTys
+      (swiftParams) <- liftIO $ zipWithM prettyParam [1..] argTys
 
-      return $ unlines
+      let fcall fargs = SwiftCodeGen $
+            "var foreign_haskell_call_result = "
+                    ++ $(lift wrapper_name)
+                    ++ "(" ++ concat (intersperse ", " fargs) ++ ")"
+      let fbody = getSwiftCodeGen $(mkHaskellCall [] (zip (map (('v':) . show) [(1::Int)..]) origArgsTy))
+
+      return $ unlines $
         [ -- let's just do it inline rather than -- "@ForeignImportHaskell"
-          "public func " ++ $(litE $ StringL name) ++ "(" ++ concat (intersperse ", " swiftParams) ++ ")"
+          "public func " ++ $(litE $ StringL orig_name) ++ "(" ++ concat (intersperse ", " swiftParams) ++ ")"
                   ++ " -> " ++ prettyMoatType retTy
         , "{"
         ]
         ++
         [ "let hs_enc = JSONEncoder()" | not (null swiftParams) ]
-        [ "let hs_dec = JSONDecoder()" | MoatAlias <- retTy ]
+        ++
+        [ "let hs_dec = JSONDecoder()" ] -- not always needed; todo track in SwiftCodeGen
+        ++
+        [ fbody ]
         ++
         [ "}" ]
     |]
@@ -295,8 +322,8 @@ outputCode produceCode = do
   runIO $
     removeFile loc `catch ` \case e | isDoesNotExistError e -> pure ()
                                     | otherwise -> throwIO e
-  [| do
-
+  [|
+    do
       -- When mod is finalizer, write all swift code to file from scratch
       createDirectoryIfMissing True (takeDirectory loc)
       putStrLn $ "Writing Swift code to: " ++ loc
@@ -315,11 +342,11 @@ locToFile l = map (\case '.' -> '/'; x -> x) l <.> "swift"
 generateSwiftCode :: ToMoatData a => Proxy a -> String
 generateSwiftCode = prettySwiftData . toMoatData
 
-prettyParam :: Int -> MoatType -> IO String
+prettyParam :: Int -> MoatType -> IO (String {- ppr with type -})
 prettyParam ix fieldType = do
   internalFieldName <- newName ("v" ++ show ix)
   let fName = "_ " ++ nameBase internalFieldName
-  return $ fName ++ ": " ++ prettyMoatType fieldType ++ (if isOptional fieldType then " = nil" else "")
+  return (fName ++ ": " ++ prettyMoatType fieldType ++ (if isOptional fieldType then " = nil" else ""))
 
 isOptional :: MoatType -> Bool
 isOptional (Optional _) = True

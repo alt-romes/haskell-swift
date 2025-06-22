@@ -37,6 +37,7 @@ library
                       filepath, directory,
                       template-haskell,
                       mtl,
+                      string-interpolate >= 0.3.4,
                       moat,
                       -- automatic swift lib SetupHooks
                       Cabal-hooks >= 3.14,
