@@ -16,7 +16,7 @@ module Foreign.Swift.Lib
   , yieldFunction
     -- ** Re-exports
   , Aeson.deriveJSON, Aeson.defaultOptions
-  , Proxy(..), ToMoatType
+  , Proxy(..), ToMoatType(..), ToMoatData(..), MoatType(..), MoatData(..)
   ) where
 
 import Data.String.Interpolate

@@ -17,3 +17,4 @@ foreignSwiftSetupHooks = noSetupHooks
 -- enum HsFFIError: Error {
 --     case requiredSizeIs(Int)
 -- }
+-- Add "import ModMap.Name.Mod_stub
