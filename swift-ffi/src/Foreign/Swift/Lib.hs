@@ -85,15 +85,8 @@ plugin = defaultPlugin
       return (CoreDoPluginPass "swift-ffi" yieldSwiftCode : tds)
   , typeCheckResultAction = \_ -> typeCheckAct }
 
--- | The plugin will load expressions from this module, so it must be loaded
 typeCheckAct :: ModSummary -> TcGblEnv -> TcM TcGblEnv
-typeCheckAct ms g = do
-  env <- TcM.getTopEnv
-  -- pprTraceM "going to load" (empty)
-  -- -- _ <- loadModuleInterface (text "load module interface for runtime loading of bcos here") (ms_mod ms)
-  -- _ <- liftIO $ forceLoadModuleInterfaces env (text "load module interface for runtime loading of bcos here") [ms_mod ms]
-  -- pprTraceM "loaded load" (empty)
-  return g
+typeCheckAct ms g = return g
 
 yieldSwiftCode :: ModGuts -> CoreM ModGuts
 yieldSwiftCode g@ModGuts{..} = do
@@ -163,6 +156,7 @@ yieldSwiftCode g@ModGuts{..} = do
             -- simply print out the Id as a string and interpret that as a
             -- string variable occurrence.
             execStmt (showPprUnsafe genId) execOptions
+
       return g
 
 --------------------------------------------------------------------------------
@@ -175,7 +169,9 @@ yieldSwiftCode g@ModGuts{..} = do
 swiftData :: TH.Name -> Q [Dec]
 swiftData name = do
   -- generate Moat class instances
-  mg <- mobileGenWith defaultOptions { dataProtocols = [Codable] } name
+  -- TODO: ONLY IF THEY DO NOT EXIST YET!
+  -- we may want to use custom ones!
+  mg <- mobileGenWith defaultOptions { dataProtocols = [Codable], typeAlias = True } name
 
   kind <- reifyType name
   let tyVars (AppT a x) = a:tyVars x
@@ -185,7 +181,7 @@ swiftData name = do
       -- Like `typ`, but use units. Used in genSwiftActionAndAnn rather than
       -- using metavariables when applying to phantom roles (only way...)
       -- How to generate types that are generic? I think this may be the right way but I'm unsure.
-      tyUnits = map (\_ -> ConT ''()) (tyVars kind)
+      tyUnits = map (\_ -> ConT ''X) (tyVars kind)
       typWithUnits = foldl' AppT (ConT name) tyUnits
 
   hasToJSON <- isInstance ''Aeson.ToJSON [typ]
@@ -208,7 +204,7 @@ swiftPtr name = do
       -- As above
   let tyVars (AppT a x) = a:tyVars x
       tyVars _ret = []
-      tyUnits = map (\_ -> ConT ''()) (tyVars kind)
+      tyUnits = map (\_ -> ConT ''X) (tyVars kind)
       typWithUnits = foldl' AppT (ConT name) tyUnits
   insts <- [d|
       instance ToMoatType $(conT name) where
@@ -265,7 +261,7 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
       mkHaskellCall fcall_args_acc ((vn, argTy):xs) = do
         let apx = [| Proxy @($(pure argTy)) |] :: Q Exp
         call_args_name <- newName "call_args"
-        [| fromHaskell $apx (toMoatType $apx) $(lift vn) $ \ $(varP call_args_name) ->
+        [| toHaskell $apx (toMoatType $apx) $(lift vn) $ \ $(varP call_args_name) ->
              $(mkHaskellCall (fcall_args_acc ++ [call_args_name]) xs)
           |]
 

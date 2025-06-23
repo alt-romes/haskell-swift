@@ -62,7 +62,7 @@ newtype SwiftCodeGen a = SwiftCodeGen { getSwiftCodeGen :: a }
 -- | Get the variable name for the shared JSON encoder
 -- (One only gets produced if it is used in the code)
 getEncoder :: SwiftCodeGen String
-getEncoder = return "hsc_enc" -- for now, always generate the encoder and decoder
+getEncoder = return "hs_enc" -- for now, always generate the encoder and decoder
 
 -- | Like 'getEncoder' but for a @JSONDecoder@
 getDecoder :: SwiftCodeGen String
