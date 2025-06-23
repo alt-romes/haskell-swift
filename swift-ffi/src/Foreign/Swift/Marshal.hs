@@ -161,7 +161,7 @@ instance ToJSON a => ToSwift (JSONMarshal a) where
           do {
               return try withUnsafeTemporaryAllocation(byteCount: buf_size, alignment: 1) { #{res_ptr} in
                   
-                  #{cont}
+      #{indent 12 cont}
                   
                   if let required_size = #{size_ptr}.baseAddress?.pointee {
                       if required_size > buf_size {
@@ -169,15 +169,15 @@ instance ToJSON a => ToSwift (JSONMarshal a) where
                       }
                   }
           
-                  #{decodeAndReturnResult}
+      #{indent 12 decodeAndReturnResult}
               }
           } catch HsFFIError.requiredSizeIs(let required_size) {
               print("Retrying with required size: \\(required_size)")
               return try withUnsafeTemporaryAllocation(byteCount: required_size, alignment: 1) { #{res_ptr} in
                   #{size_ptr}.baseAddress?.pointee = required_size
                   
-                  #{cont}
-                  #{decodeAndReturnResult}
+      #{indent 12 cont}
+      #{indent 12 decodeAndReturnResult}
               }
           }
       }
@@ -196,8 +196,8 @@ instance FromJSON a => FromSwift (JSONMarshal a) where
     return [__i|
       var #{v_data} = try #{enc}.encode(#{v})
       let #{v_datalen} = Int64(#{v_data}.count)
-      try #{v_data}.withUnsafeMutableBytes { (#{v_ptr}:UnsafeMutableRawBufferPointer)
-        in #{cont}
+      return try #{v_data}.withUnsafeMutableBytes { (#{v_ptr}:UnsafeMutableRawBufferPointer) in
+    #{indent 4 cont}
       }
     |]
 
@@ -210,9 +210,10 @@ instance ToSwift (PtrMarshal a) where
   fromHaskell _ _ty r getCont = do
     -- For a StablePtr, simply return the result of the foreign call
     cont <- getCont []
-    return [__i| #{cont}
-                 return #{r}
-               |]
+    return [__i|
+      #{cont}
+      return #{r}!
+    |]
 
 instance FromSwift (PtrMarshal a) where
   type ForeignArgKind (PtrMarshal a) = PtrKind
@@ -228,4 +229,9 @@ instance FromSwift (PtrMarshal a) where
 deriving via (JSONMarshal [a]) instance ToJSON a => ToSwift [a]
 deriving via (JSONMarshal [a]) instance FromJSON a => FromSwift [a]
 
+--------------------------------------------------------------------------------
+-- Utils
+--------------------------------------------------------------------------------
 
+indent :: Int -> String -> String
+indent n = unlines . map (replicate n ' ' ++) . lines

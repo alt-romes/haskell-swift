@@ -295,11 +295,16 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
         , "{"
         ]
         ++
-        [ "let hs_enc = JSONEncoder()" | not (null swiftParams) ]
+        [ "  let hs_enc = JSONEncoder()" | not (null swiftParams) ]
         ++
-        [ "let hs_dec = JSONDecoder()" ] -- not always needed; todo track in SwiftCodeGen
+        [ "  let hs_dec = JSONDecoder()" ] -- not always needed; todo track in SwiftCodeGen
         ++
-        [ fbody ]
+        [ "  do {"
+        , indent 4 fbody
+        , "  } catch {"
+        , "    fatalError(\"Error decoding JSON marshaled from Haskell, probably: \\(error)\")"
+        , "  }"
+        ]
         ++
         [ "}" ]
     |]

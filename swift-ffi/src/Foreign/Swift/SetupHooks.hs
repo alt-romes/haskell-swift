@@ -10,3 +10,10 @@ foreignSwiftSetupHooks = noSetupHooks
     { preBuildComponentRules = Nothing -- todo: delete existing distribution files before writing on top? Or just make sure to always write to a temp dir...
     }
   }
+
+-- TODO:
+-- Add "import Foundation"
+-- Add (not public!):
+-- enum HsFFIError: Error {
+--     case requiredSizeIs(Int)
+-- }
