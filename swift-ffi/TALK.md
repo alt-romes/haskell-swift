@@ -3,6 +3,9 @@ Help! There are 5 runtimes in my Haskell x Swift interop
 1. Template Haskell runtime
     - Generate Moat instances, Marshaling instances, and functions that when
       run produce Swift code for these types
+    - Generate foreign exports
+        - There's some forced type family reduction to figure out the foreign
+          function type using ToSwift's associated type families.
     - Also delete stale Swift file for the module being recompiled
 2. Plugin runtime
     - Collect all functions that produce code using annotations
