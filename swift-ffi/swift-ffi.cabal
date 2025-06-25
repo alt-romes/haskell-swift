@@ -31,7 +31,8 @@ library
 
     -- other-modules:
     -- other-extensions:
-    build-depends:    base >=4.17,
+    build-depends:    Cabal-syntax ^>=3.14.2.0,
+                      base >=4.17,
                       aeson,
                       bytestring,
                       filepath, directory,

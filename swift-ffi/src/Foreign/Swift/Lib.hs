@@ -5,8 +5,6 @@
 -- | Produce a swift library by building a Haskell package using
 -- TemplateHaskell and Cabal SetupHooks
 module Foreign.Swift.Lib
--- todo: probably rename this e.g. Data and/move something else soemwhere like Yield?
-
   ( plugin, SwiftExport(..), genSwiftActionAndAnn
     -- * Datatypes
   , swiftData
@@ -14,39 +12,25 @@ module Foreign.Swift.Lib
   , yieldType
     -- * Functions
   , yieldFunction
+    -- * Utils
+  , locToFile, buildDir
     -- ** Re-exports
   , Aeson.deriveJSON, Aeson.defaultOptions
   , Proxy(..), ToMoatType(..), ToMoatData(..), MoatType(..), MoatData(..)
   ) where
 
-import Data.String.Interpolate
 import GHC.Iface.Make
-import qualified Data.List.NonEmpty as NE
 import Control.Exception
-import GHC.Utils.Trace
-import GHC.Linker.Loader
-import GHC.Unit.Module.ModDetails
-import GHC.Unit.Finder
-import GHC.Types.ForeignStubs
 import Control.Monad
 import GHC
 import Data.Data (Data)
 import Data.List (intersperse)
-import Data.Maybe
 import Data.Proxy (Proxy(..))
-import GHC.ByteCode.Types
-import GHC.Core.ConLike (ConLike(..))
-import GHC.Core.InstEnv
-import GHC.Core.TyCo.Compare (eqType)
 import GHC.Driver.Env
 import GHC.Driver.Main hiding (getHscEnv)
 import GHC.Linker.Types
 import GHC.Plugins
-import GHC.Runtime.Context (InteractiveImport(..))
-import GHC.Runtime.Eval
 import GHC.Tc.Utils.Monad (TcM, TcGblEnv)
-import GHC.Types.TyThing (MonadThings(..), TyThing (..))
-import GHC.Unit.External
 import GHC.Unit.Home.ModInfo
 import Language.Haskell.TH as TH hiding (Name, ppr)
 import Language.Haskell.TH.Syntax (Lift (..))
@@ -57,12 +41,6 @@ import System.IO.Error
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.TH as Aeson
 import qualified Data.List as List
-import qualified GHC
-import qualified GHC.Core.Class as Core
-import qualified GHC.Tc.Utils.Monad as TcM
-import qualified GHC.Tc.Utils.TcType as Core
-import qualified GHC.Types.Name.Occurrence as NameSpace
-import qualified GHC.Unit.Env as HUG
 #if __GLASGOW_HASKELL__ >= 913
 import qualified GHC.Unit.Home.Graph as HUG
 #endif
