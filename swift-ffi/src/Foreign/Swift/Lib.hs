@@ -13,7 +13,7 @@ module Foreign.Swift.Lib
     -- * Functions
   , yieldFunction
     -- * Utils
-  , locToFile, buildDir
+  , locToFile, buildDir, sourcesDir
     -- ** Re-exports
   , Aeson.deriveJSON, Aeson.defaultOptions
   , Proxy(..), ToMoatType(..), ToMoatData(..), MoatType(..), MoatData(..)
@@ -294,7 +294,7 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
 -- | Yield an expression which will yield a piece of code to the current module being generated.
 outputCode :: Q Exp -> Q Exp
 outputCode produceCode = do
-  loc <- (buildDir </>) . locToFile . loc_module <$> location
+  loc <- (sourcesDir </>) . locToFile . loc_module <$> location
 
   -- When this splice runs (rather than when the produced expression is run)
   -- reset the files written by it
@@ -313,6 +313,9 @@ outputCode produceCode = do
 -- | Where to write lib
 buildDir :: FilePath
 buildDir = "_build"
+
+sourcesDir :: FilePath
+sourcesDir = buildDir </> "Sources"
 
 -- | Convert a module's 'Location' into the relative path to the Swift file we're writing
 locToFile :: String -> FilePath

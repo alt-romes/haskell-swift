@@ -43,7 +43,7 @@ postBuild PostBuildComponentInputs{..} = do
         TargetInfo{targetComponent=CFLib ForeignLib{foreignLibBuildInfo}}
           -> otherModules foreignLibBuildInfo
         _ -> []
-  let possibleModPaths = map ((<.> "swift") . (buildDir </>) . ModName.toFilePath) modules
+  let possibleModPaths = map ((<.> "swift") . (sourcesDir </>) . ModName.toFilePath) modules
 
   -- Keep only modules that are swift files that do exist
   swiftMods <- filterM (\(path, _mod) -> doesFileExist path) $ zip possibleModPaths modules
@@ -84,6 +84,9 @@ postBuild PostBuildComponentInputs{..} = do
 
 includeDir :: FilePath
 includeDir = buildDir </> "include"
+
+modulemapsDir :: FilePath
+modulemapsDir = buildDir </> "include"
 
 modNameString :: ModName.ModuleName -> String
 modNameString = List.intercalate "." . ModName.components
