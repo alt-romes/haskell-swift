@@ -321,7 +321,7 @@ swiftSourcesDir :: FilePath
 swiftSourcesDir = sourcesDir </> "Swift"
 
 haskellSourcesDir :: FilePath
-haskellSourcesDir = sourcesDir </> "Haskell"
+haskellSourcesDir = sourcesDir </> "ForeignHaskell"
 
 -- | Convert a module's 'Location' into the relative path to the Swift file we're writing
 locToFile :: String -> FilePath

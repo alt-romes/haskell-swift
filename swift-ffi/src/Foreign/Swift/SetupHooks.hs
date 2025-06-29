@@ -13,6 +13,7 @@ import System.Directory
 import Distribution.Compiler (PerCompilerFlavor(PerCompilerFlavor))
 import qualified Data.List as List
 import Data.String.Interpolate
+import Distribution.Pretty (Pretty(pretty))
 
 foreignSwiftSetupHooks :: SetupHooks
 foreignSwiftSetupHooks = noSetupHooks
@@ -102,13 +103,13 @@ postBuild PostBuildComponentInputs{..} = do
   -- library static archive:
   -- xcodebuild -create-xcframework
   -- -library ../dist-newstyle/build/aarch64-osx/ghc-9.10.1/cob-swift-library-0.1.0.0/build/libHScob-swift-library-0.1.0.0-inplace.a
-  -- -headers /Users/romes/Developer/cob-hs/cob-swift/_build/Sources/Haskell/include/Foreign
   -- -headers /nix/store/s3qv9ki02767wm20irnmfz805qgwi68i-libffi-39-dev/include
   -- -headers /nix/store/0563gdnsfhwch8fvlrzxzc77qz8dna2q-ghc-9.10.1/lib/ghc-9.10.1/lib/../lib/aarch64-osx-ghc-9.10.1/rts-1.0.2/include
   -- -output _build/CobSwiftLib.xcframework
 
   let packageFile = buildDir </> "Package.swift"
-  let swiftLibName = componentLocalName (targetCLBI targetInfo)
+  let swiftLibName = reverse $ takeWhile (/= ':') $ reverse -- drop e.g. "flib" in "flib:actual-name"
+                     $ show $ pretty $ componentLocalName (targetCLBI targetInfo)
   B.writeFile packageFile $ [__i|
     // swift-tools-version: 6.1
     import PackageDescription
@@ -122,8 +123,8 @@ postBuild PostBuildComponentInputs{..} = do
             .library(name: "#{swiftLibName}", targets: ["Foreign"])
         ],
         targets: [
-            .target(name: "Foreign", dependencies: ["Haskell"], path: "Sources/Swift"),
-            .target(name: "Haskell", dependencies: ["HaskellLib"], path: "Sources/Haskell"),
+            .target(name: "Foreign", dependencies: ["ForeignHaskell"], path: "Sources/Swift"),
+            .target(name: "ForeignHaskell", dependencies: ["HaskellLib"], path: "Sources/ForeignHaskell"),
             // This dependency on the xcframework basically makes the RTS headers available
             // to the Haskell foreign exports because the xcframework bundles the RTS api
             // with the static lib for the foreign lib.
