@@ -3,8 +3,10 @@
 -- produce a Swift library when building a Haskell library
 module Foreign.Swift.SetupHooks where
 
+import Distribution.XCFramework.SetupHooks (xcframeworkHooks)
 import qualified Data.ByteString.Char8 as B
 import Distribution.Simple.SetupHooks
+import Distribution.Types.UnitId
 import qualified Distribution.ModuleName as ModName
 import Foreign.Swift.Lib
 import System.FilePath
@@ -13,21 +15,23 @@ import System.Directory
 import Distribution.Compiler (PerCompilerFlavor(PerCompilerFlavor))
 import qualified Data.List as List
 import Data.String.Interpolate
-import Distribution.Pretty (Pretty(pretty))
+import Distribution.Pretty (prettyShow)
 
-foreignSwiftSetupHooks :: SetupHooks
-foreignSwiftSetupHooks = noSetupHooks
-  { configureHooks = noConfigureHooks
-    { preConfComponentHook = Just setStubDir
+foreignSwiftSetupHooks :: String {-^ Swift library name -} -> SetupHooks
+foreignSwiftSetupHooks libName = let xcfPath = buildDir </> libName <.> "xcframework" in
+  xcframeworkHooks xcfPath
+  <> noSetupHooks
+    { configureHooks = noConfigureHooks
+      { preConfComponentHook = Just setStubDir
+      }
+    , buildHooks = noBuildHooks
+      { preBuildComponentRules = Nothing
+          -- todo: delete existing distribution files before writing on top? Or just make sure to always write to a temp dir...
+          -- maybe select folder where to put artifacts too (e.g. with env var)
+      , postBuildComponentHook = Just $ postBuild libName
+          
+      }
     }
-  , buildHooks = noBuildHooks
-    { preBuildComponentRules = Nothing
-        -- todo: delete existing distribution files before writing on top? Or just make sure to always write to a temp dir...
-        -- maybe select folder where to put artifacts too (e.g. with env var)
-    , postBuildComponentHook = Just postBuild
-        
-    }
-  }
 
 setStubDir :: PreConfComponentInputs -> IO PreConfComponentOutputs
 setStubDir PreConfComponentInputs{..} = do
@@ -37,8 +41,8 @@ setStubDir PreConfComponentInputs{..} = do
   return PreConfComponentOutputs
     { componentDiff = buildInfoComponentDiff (componentName component) with_stub }
 
-postBuild :: PostBuildComponentInputs -> IO ()
-postBuild PostBuildComponentInputs{..} = do
+postBuild :: String -> PostBuildComponentInputs -> IO ()
+postBuild libName PostBuildComponentInputs{..} = do
   let modules = case targetInfo of
         TargetInfo{targetComponent=CLib Library{libBuildInfo, exposedModules}}
           -> exposedModules ++ otherModules libBuildInfo
@@ -113,19 +117,22 @@ postBuild PostBuildComponentInputs{..} = do
   -- -output _build/CobSwiftLib.xcframework
 
   let packageFile = buildDir </> "Package.swift"
-  let swiftLibName = reverse $ takeWhile (/= ':') $ reverse -- drop e.g. "flib" in "flib:actual-name"
-                     $ show $ pretty $ componentLocalName (targetCLBI targetInfo)
+  -- let swiftLibName = getHSLibraryName $ componentUnitId $ targetCLBI targetInfo
+  -- let swiftLibName = case targetCLBI targetInfo of
+  --       LibComponentLocalBuildInfo{..} -> prettyShow componentCompatPackageName
+  --       other -> reverse $ takeWhile (/= ':') $ reverse -- drop e.g. "flib" in "flib:actual-name"
+  --                   $ prettyShow $ componentLocalName other
   B.writeFile packageFile $ [__i|
     // swift-tools-version: 6.1
     import PackageDescription
     
     let package = Package(
-        name: "#{swiftLibName}",
+        name: "#{libName}",
         platforms: [
             .macOS(.v15)
         ],
         products: [
-            .library(name: "#{swiftLibName}", targets: ["Foreign"])
+            .library(name: "#{libName}", targets: ["Foreign"])
         ],
         targets: [
             .target(name: "Foreign", dependencies: ["ForeignHaskell"], path: "Sources/Swift"),
@@ -135,7 +142,7 @@ postBuild PostBuildComponentInputs{..} = do
             // with the static lib for the foreign lib.
             .binaryTarget(
                 name: "HaskellLib",
-                path: "CobSwiftLib.xcframework"
+                path: "#{libName}.xcframework"
             )
         ]
     )
@@ -146,7 +153,7 @@ postBuild PostBuildComponentInputs{..} = do
   -- // with the static lib for the foreign lib.
   -- 
 
-  print ("Post build!", swiftMods, swiftLibName)
+  print ("Post build!", swiftMods)
 
 -- It looks like to package the Haskell dylib/static archive as a library we may want to use XCFrameworks:
 -- - https://developer.apple.com/documentation/xcode/creating-a-multi-platform-binary-framework-bundle

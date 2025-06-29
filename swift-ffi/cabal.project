@@ -1,4 +1,4 @@
-packages: .
+packages: ., ../xcframework/
 
 allow-newer: moat:*
 
