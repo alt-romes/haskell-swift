@@ -7,7 +7,7 @@
 module Foreign.Swift.Lib
   ( plugin, SwiftExport(..), genSwiftActionAndAnn
     -- * Datatypes
-  , swiftData
+  , swiftData, swiftDataWith, moatDefOpts
   , swiftPtr
   , yieldType
     -- * Functions
@@ -16,7 +16,7 @@ module Foreign.Swift.Lib
   , locToFile, buildDir, sourcesDir, haskellSourcesDir, swiftSourcesDir
     -- ** Re-exports
   , Aeson.deriveJSON, Aeson.defaultOptions
-  , Proxy(..), ToMoatType(..), ToMoatData(..), MoatType(..), MoatData(..)
+  , Proxy(..), ToMoatType(..), ToMoatData(..), MoatType(..), MoatData(..), Options(..)
   ) where
 
 import GHC.Iface.Make
@@ -141,15 +141,23 @@ yieldSwiftCode g@ModGuts{..} = do
 -- * Types / Data
 --------------------------------------------------------------------------------
 
+moatDefOpts :: Options
+moatDefOpts = defaultOptions
+
 -- | Yield a datatype declaration for the given datatype name
 --
 -- Example of top level splice: @$(swiftData ''User)@
 swiftData :: TH.Name -> Q [Dec]
-swiftData name = do
+swiftData = swiftDataWith defaultOptions
+
+-- | Like 'swiftData' but with additional 'Moat' 'Options'
+swiftDataWith :: Options -> TH.Name -> Q [Dec]
+swiftDataWith moatopts name = do
   -- generate Moat class instances
   -- TODO: ONLY IF THEY DO NOT EXIST YET!
   -- we may want to use custom ones!
-  mg <- mobileGenWith defaultOptions { dataProtocols = [Codable], typeAlias = True } name
+
+  mg <- mobileGenWith moatopts { dataProtocols = Codable:(dataProtocols moatopts), typeAlias = True } name
 
   kind <- reifyType name
   let tyVars (AppT a x) = a:tyVars x
@@ -279,8 +287,10 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
         ++
         [ "  do {"
         , indent 4 fbody
+        , "  } catch HsFFIError.decodingFailed(let data, let error) {"
+        , "    fatalError(\"Error decoding Haskell data \\(data). Failed with \\(error)\")"
         , "  } catch {"
-        , "    fatalError(\"Error decoding JSON marshaled from Haskell, probably: \\(error)\")"
+        , "    fatalError(\"Unknown error in foreign Haskell marshal: \\(error)\")"
         , "  }"
         ]
         ++

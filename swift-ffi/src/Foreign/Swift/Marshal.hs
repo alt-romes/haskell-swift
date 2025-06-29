@@ -148,7 +148,11 @@ instance ToJSON a => ToSwift (JSONMarshal a) where
     -- print("Read JSON from Haskell: \\(String(bytes: new_data, encoding: .utf8) ?? "???")")
     let decodeAndReturnResult = [__i|
           let new_data = Data(bytesNoCopy: #{res_ptr}.baseAddress!, count: #{size_ptr}.baseAddress?.pointee ?? 0, deallocator: .none)
-          return try #{decoder}.decode(#{prettyMoatType retType}.self, from: new_data)
+          do {
+            return try #{decoder}.decode(#{prettyMoatType retType}.self, from: new_data)
+          } catch let err {
+            throw HsFFIError.decodingFailed(String(decoding: new_data, as: UTF8.self), err)
+          }
         |] :: String
     cont <- getCont [res_ptr++".baseAddress", size_ptr++".baseAddress"]
     return [__i|

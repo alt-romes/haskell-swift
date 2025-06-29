@@ -61,6 +61,7 @@ postBuild PostBuildComponentInputs{..} = do
       , ""
       , "enum HsFFIError: Error {"
       , "    case requiredSizeIs(Int)"
+      , "    case decodingFailed(String, Error)"
       , "}"
       , ""
       ]
@@ -83,13 +84,13 @@ postBuild PostBuildComponentInputs{..} = do
     , ""
     ]
 
-  -- B.writeFile (haskellSourcesDir </> "haskell.c") [__i|
-  --   //
-  --   //  A stub source file is necessary to produce a stub .o file to satisfy
-  --   //    swift build
-  --   //
-  --   void haskell_object_stub(void) {};
-  -- |]
+  B.writeFile (haskellSourcesDir </> "haskell.c") [__i|
+    //
+    //  A stub source file is necessary to produce a stub .o file to satisfy
+    //    swift build, otherwise it will fail with a missing .o error.
+    //
+    void haskell_object_stub(void) {};
+  |]
 
   -- TODO: Put each module in a separate folder with the same name of the
   -- module because in Swift the hierarchy is per-folder, and all modules in
@@ -98,6 +99,10 @@ postBuild PostBuildComponentInputs{..} = do
 
   -- TODO: Build the XCFramework as part of the process.
   -- Maybe even as a separate library
+  -- Experiment with creating fully static or dynamic foreign lib
+  -- The foreign lib is neat bc we can keep the FFI part outside of the core library.
+  -- What are the drawbacks of the dylib approach? can we still package?
+  -- What would it take to implement fully static in cabal as a support flib type?
 
   -- HOW TO DO IT: Build an XCFramework with path to RTS headers and to foreign
   -- library static archive:
