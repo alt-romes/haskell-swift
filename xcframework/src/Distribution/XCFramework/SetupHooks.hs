@@ -5,7 +5,6 @@ module Distribution.XCFramework.SetupHooks (xcframeworkHooks) where
 
 import System.Process
 import System.FilePath
-import System.Directory
 import Distribution.Simple.SetupHooks
 import Distribution.Simple.LocalBuildInfo
     ( LocalBuildInfo(compiler, hostPlatform),
@@ -13,7 +12,6 @@ import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.BuildPaths (mkSharedLibName)
 import Distribution.Simple.Setup (setupVerbosity)
 import Distribution.Pretty (prettyShow)
-import Distribution.Types.UnitId (getHSLibraryName)
 import Distribution.Simple.Flag (fromFlag)
 import Distribution.Simple.Program
 
