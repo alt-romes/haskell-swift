@@ -86,18 +86,23 @@ postBuild outFile PostBuildComponentInputs{..} = do
           , "// Do not edit manually."
           , ""
           , "module Haskell {"
+          , "  module Foreign {"
           , ""
-          , "   module Rts {"
-          , "       header \"HsFFI.h\"" -- always imports HsFFI.h from the RTS
-          , "   }"
+          , "    module Rts {"
+          , "      header \"HsFFI.h\"" -- always imports HsFFI.h from the RTS
+          , "      export *"
+          , "    }"
           , ""  -- Export all Haskell foreign exports from this module
-          , "   module Foreign.Exports {"
+          , "    module Exports {"
           ]
           ++
-          [ "       header \"" ++ h ++ "\""
+          [ "      header \"" ++ h ++ "\""
           | h <- hsLibraryHeaders ]
           ++
-          [ "   }" ]
+          [ "      export *"
+          , "    }"
+          , ""
+          , "  }" ]
           ++
           [ "}" ]
 
