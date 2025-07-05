@@ -150,6 +150,7 @@ aesonDefaultOptions = Aeson.defaultOptions
   { Aeson.constructorTagModifier = \case
       [] -> []
       (x:xs) -> Char.toLower x : xs
+  , Aeson.allNullaryToStringTag = True -- default
   }
 
 -- | Yield a datatype declaration for the given datatype name
@@ -165,7 +166,24 @@ swiftDataWith moatopts name = do
   -- TODO: ONLY IF THEY DO NOT EXIST YET!
   -- we may want to use custom ones!
 
-  mg <- mobileGenWith moatopts { dataProtocols = Codable:(dataProtocols moatopts), typeAlias = True } name
+  info <- reify name
+  let shouldDeriveString = case info of
+        TyConI (DataD _ _ _ _ cons _)
+          -- All constructors are nullary and there's more than one constructor,
+          -- then we want to Derive String to Match Aeson's allNullaryToStringTag = True encoding
+          | length cons > 1
+          , all (\case NormalC _ [] -> True
+                       _ -> False
+                ) cons
+          -> True
+        _ -> False
+
+  mg <- mobileGenWith moatopts
+          { dataProtocols =
+              (if shouldDeriveString then [OtherProtocol "String"] else [])
+              ++ Codable:(dataProtocols moatopts)
+          , typeAlias = True
+          } name
 
   kind <- reifyType name
   let tyVars (AppT a x) = a:tyVars x
