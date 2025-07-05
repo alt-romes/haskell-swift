@@ -132,11 +132,6 @@ postBuild outFile PostBuildComponentInputs{..} = do
       putStrLn $
         "Ignoring xcframeworkHooks for non-library component "
           ++ prettyShow (componentLocalName other)
-  where
-    -- ../rts/include --> rts
-    -- ../ffi/include --> ffi
-    getNameFromIncludeDir = takeFileName {- take it -} . dropTrailingPathSeparator
-                          . dropFileName {- include dir -} . dropTrailingPathSeparator
 
 -- Recursively get all .h files and all symlinks directories
 getHeaderFiles :: FilePath -> IO [FilePath]
