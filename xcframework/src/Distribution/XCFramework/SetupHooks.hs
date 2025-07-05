@@ -14,6 +14,8 @@ import Distribution.Simple.Setup (setupVerbosity)
 import Distribution.Pretty (prettyShow)
 import Distribution.Simple.Flag (fromFlag)
 import Distribution.Simple.Program
+import System.Directory
+import Control.Monad
 
 -- | Add these hooks to your 'setupHooks' in @SetupHooks.hs@ to automatically
 -- produce at the given location an xcframework from the Haskell library
@@ -70,6 +72,10 @@ postBuild outFile PostBuildComponentInputs{..} = do
             | d <- includeDirs
             ]
 
+      when (takeExtension outFile == ".xcframework") $ do
+        putStrLn $ "Removing existing XCFramework at " ++ outFile
+        removePathForcibly outFile
+
       putStrLn "Creating XCFramework..."
       putStrLn cmd
 
@@ -84,3 +90,11 @@ postBuild outFile PostBuildComponentInputs{..} = do
       putStrLn $
         "Ignoring xcframeworkHooks for non-library component "
           ++ prettyShow (componentLocalName other)
+
+-- TODO:
+-- Avoid using dynamic library files (.dylib files) for dynamic linking. An
+-- XCFramework can include dynamic library files, but only macOS supports these
+-- libraries for dynamic linking. Dynamic linking on iOS, iPadOS, tvOS,
+-- visionOS, and watchOS requires the XCFramework to contain .framework
+-- bundles. [1]
+-- [1] https://developer.apple.com/documentation/xcode/creating-a-multi-platform-binary-framework-bundle
