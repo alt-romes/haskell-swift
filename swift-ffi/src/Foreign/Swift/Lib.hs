@@ -15,7 +15,7 @@ module Foreign.Swift.Lib
     -- * Utils
   , locToFile, buildDir, sourcesDir, haskellSourcesDir, swiftSourcesDir
     -- ** Re-exports
-  , Aeson.deriveJSON, Aeson.defaultOptions
+  , Aeson.deriveJSON, aesonDefaultOptions
   , Proxy(..), ToMoatType(..), ToMoatData(..), MoatType(..), MoatData(..), Options(..)
   ) where
 
@@ -45,6 +45,7 @@ import qualified Data.List as List
 import qualified GHC.Unit.Home.Graph as HUG
 #endif
 import qualified Language.Haskell.TH as TH (Name)
+import qualified Data.Char as Char
 
 data SwiftExport = ExportSwiftData (String {- tycon name -})
                  | ExportSwiftFunction
@@ -144,6 +145,13 @@ yieldSwiftCode g@ModGuts{..} = do
 moatDefOpts :: Options
 moatDefOpts = defaultOptions
 
+aesonDefaultOptions :: Aeson.Options
+aesonDefaultOptions = Aeson.defaultOptions
+  { Aeson.constructorTagModifier = \case
+      [] -> []
+      (x:xs) -> Char.toLower x : xs
+  }
+
 -- | Yield a datatype declaration for the given datatype name
 --
 -- Example of top level splice: @$(swiftData ''User)@
@@ -174,9 +182,9 @@ swiftDataWith moatopts name = do
   hasFromJSON <- isInstance ''Aeson.FromJSON [typ]
 
   toJSON   <- if hasToJSON then pure []
-              else Aeson.deriveToJSON Aeson.defaultOptions name
+              else Aeson.deriveToJSON aesonDefaultOptions name
   fromJSON <- if hasFromJSON then pure []
-              else Aeson.deriveFromJSON Aeson.defaultOptions name
+              else Aeson.deriveFromJSON aesonDefaultOptions name
 
   gens <- genSwiftActionAndAnn yieldType name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
 

@@ -12,7 +12,7 @@ module Foreign.Swift
 
     -- ** Re-exports
     -- | You're using TH already: might as well use it for deriving JSON.
-  , deriveJSON, defaultOptions
+  , deriveJSON, aesonDefaultOptions
   )
   where
 
