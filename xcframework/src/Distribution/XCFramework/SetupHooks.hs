@@ -54,7 +54,8 @@ postBuild outFile PostBuildComponentInputs{..} = do
 
     do_it libHSname = do
 
-      let libHS = i (componentBuildDir localBuildInfo clbi) </> libHSname
+      let buildDir = i (componentBuildDir localBuildInfo clbi)
+      let libHS = buildDir </> libHSname
 
       -- Get ghc-pkg program
       (ghcPkgProg, _) <- requireProgram verbosity ghcPkgProgram progDb
@@ -67,7 +68,11 @@ postBuild outFile PostBuildComponentInputs{..} = do
       tmpDir <- getCanonicalTemporaryDirectory
       withTempDirectory tmpDir "xcframework" $ \finalHeadersDir -> do
 
-        mapM_ (\idir -> copyIncludeDir finalHeadersDir (getNameFromIncludeDir idir) idir) includeDirs
+        -- Copy the RTS headers
+        mapM_ (\idir -> copyHeaderFiles idir (finalHeadersDir </> getNameFromIncludeDir idir)) includeDirs
+
+        -- Copy the headers (only) generated from foreign exports in this package
+        copyHeaderFiles buildDir (finalHeadersDir </> "library")
 
         let cmd = unwords $
               [ "xcodebuild", "-create-xcframework"
@@ -76,7 +81,8 @@ postBuild outFile PostBuildComponentInputs{..} = do
               , "-headers", finalHeadersDir
               ]
 
-        when (takeExtension outFile == ".xcframework") $ do
+        xcfExists <- doesDirectoryExist outFile
+        when (xcfExists && takeExtension outFile == ".xcframework") $ do
           putStrLn $ "Removing existing XCFramework at " ++ outFile
           removePathForcibly outFile
 
@@ -97,11 +103,8 @@ postBuild outFile PostBuildComponentInputs{..} = do
   where
     -- ../rts/include --> rts
     -- ../ffi/include --> ffi
-    getNameFromIncludeDir = takeFileName {- take it -} . dropTrailingPathSeparator . dropFileName {- include dir -} . dropTrailingPathSeparator
-
-    copyIncludeDir :: FilePath {- out -} -> String {- subdir name -} -> FilePath {- where headers are -} -> IO ()
-    copyIncludeDir out name orig = do
-      copyHeaderFiles orig (out </> name)
+    getNameFromIncludeDir = takeFileName {- take it -} . dropTrailingPathSeparator
+                          . dropFileName {- include dir -} . dropTrailingPathSeparator
 
 -- Recursively get all .h files and all symlinks directories
 getHeaderFiles :: FilePath -> IO [FilePath]
@@ -131,7 +134,7 @@ copyHeaderFiles srcDir destDir = do
         else do
           createDirectoryIfMissing True destDirPath
           copyFile srcPath destPath
-          putStrLn $ "Copied: " ++ srcPath ++ " -> " ++ destPath
+          -- putStrLn $ "Copied: " ++ srcPath ++ " -> " ++ destPath
 
 -- TODO:
 -- Avoid using dynamic library files (.dylib files) for dynamic linking. An
