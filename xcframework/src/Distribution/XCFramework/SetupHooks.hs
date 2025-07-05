@@ -3,6 +3,7 @@
 -- from a Haskell library
 module Distribution.XCFramework.SetupHooks (xcframeworkHooks) where
 
+import System.IO.Temp
 import System.Process
 import System.FilePath
 import Distribution.Simple.SetupHooks
@@ -63,23 +64,26 @@ postBuild outFile PostBuildComponentInputs{..} = do
       -- TODO: `words` won't work if the include dirs have spaces in them.
       let includeDirs = words includeDirsStr
 
-      let cmd = unwords $
-            [ "xcodebuild", "-create-xcframework"
-            , "-output", outFile
-            , "-library", libHS
-            ] ++ concat
-            [ ["-headers", d]
-            | d <- includeDirs
-            ]
+      tmpDir <- getCanonicalTemporaryDirectory
+      withTempDirectory tmpDir "xcframework" $ \finalHeadersDir -> do
 
-      when (takeExtension outFile == ".xcframework") $ do
-        putStrLn $ "Removing existing XCFramework at " ++ outFile
-        removePathForcibly outFile
+        mapM_ (\idir -> copyIncludeDir finalHeadersDir (getNameFromIncludeDir idir) idir) includeDirs
 
-      putStrLn "Creating XCFramework..."
-      putStrLn cmd
+        let cmd = unwords $
+              [ "xcodebuild", "-create-xcframework"
+              , "-output", outFile
+              , "-library", libHS
+              , "-headers", finalHeadersDir
+              ]
 
-      callCommand cmd
+        when (takeExtension outFile == ".xcframework") $ do
+          putStrLn $ "Removing existing XCFramework at " ++ outFile
+          removePathForcibly outFile
+
+        putStrLn "Creating XCFramework..."
+        putStrLn cmd
+
+        callCommand cmd
 
   case targetCLBI targetInfo of
     LibComponentLocalBuildInfo{}
@@ -90,6 +94,44 @@ postBuild outFile PostBuildComponentInputs{..} = do
       putStrLn $
         "Ignoring xcframeworkHooks for non-library component "
           ++ prettyShow (componentLocalName other)
+  where
+    -- ../rts/include --> rts
+    -- ../ffi/include --> ffi
+    getNameFromIncludeDir = takeFileName {- take it -} . dropTrailingPathSeparator . dropFileName {- include dir -} . dropTrailingPathSeparator
+
+    copyIncludeDir :: FilePath {- out -} -> String {- subdir name -} -> FilePath {- where headers are -} -> IO ()
+    copyIncludeDir out name orig = do
+      copyHeaderFiles orig (out </> name)
+
+-- Recursively get all .h files and all symlinks directories
+getHeaderFiles :: FilePath -> IO [FilePath]
+getHeaderFiles dir = do
+    contents <- listDirectory dir
+    paths <- forM contents $ \name -> do
+        let path = dir </> name
+        isDir <- doesDirectoryExist path
+        isSymlink <- pathIsSymbolicLink path
+        if isDir && not isSymlink
+            then getHeaderFiles path
+            else return [path | takeExtension name == ".h" || (isSymlink && isDir)]
+    return (concat paths)
+
+-- Copy each .h file preserving directory structure
+copyHeaderFiles :: FilePath -> FilePath -> IO ()
+copyHeaderFiles srcDir destDir = do
+    headerFiles <- getHeaderFiles srcDir
+    forM_ headerFiles $ \srcPath -> do
+        srcIsSymlink <- pathIsSymbolicLink srcPath
+        let relPath = makeRelative srcDir srcPath
+            destPath = destDir </> relPath
+            destDirPath = takeDirectory destPath
+        if srcIsSymlink then do
+          tgt <- getSymbolicLinkTarget srcPath
+          createDirectoryLink tgt destPath
+        else do
+          createDirectoryIfMissing True destDirPath
+          copyFile srcPath destPath
+          putStrLn $ "Copied: " ++ srcPath ++ " -> " ++ destPath
 
 -- TODO:
 -- Avoid using dynamic library files (.dylib files) for dynamic linking. An
