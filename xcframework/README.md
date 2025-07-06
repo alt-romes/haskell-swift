@@ -3,10 +3,12 @@
 Cabal hooks for producing an
 [XCFramework](https://developer.apple.com/documentation/xcode/creating-a-multi-platform-binary-framework-bundle)
 from a Haskell library bundling the library binary artifact, the RTS and
-foreign-exports headers, and a modulemap
-exporting the headers as Swift modules.
+foreign-exports headers, and a modulemap exporting the headers as Swift
+modules.
 
-# How to use
+Refer also to the [release blogpost](https://alt-romes.github.io/posts/2025-07-05-packaging-a-haskell-library-as-a-swift-binary-xcframework.html).
+
+## How to Use
 
 In your cabal file, change the `build-type` to `Hooks` (and set `cabal-version:
 3.14` if not set already):
@@ -105,3 +107,24 @@ import Haskell.Foreign.Exports
 
 let x = doSomething()
 ```
+
+## Must use Cabal Foreign Library stanza
+
+Unfortunately, while I don't figure out how to link the right amount of things
+into the `.xcframework` after building a normal `library` component in Cabal,
+the `foreign export`s must be exported from a `foreign-library` Cabal stanza:
+
+```
+foreign-library myexample
+    type: native-shared
+    options: standalone
+    other-modules:    MyLib
+    build-depends:    base ^>=4.20.0.0
+    hs-source-dirs:   src
+    default-language: GHC2021
+```
+
+To clarify the instructions, I put together [a small demo
+project](https://github.com/alt-romes/hs-xcframework-simple-demo/) with a
+working setup -- if you want to try it out. Remember to build the Cabal library first!
+
