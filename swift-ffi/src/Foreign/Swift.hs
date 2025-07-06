@@ -249,11 +249,11 @@ foreignValKind con ty = do
   nty <- normaliseTy =<< [t| $con $(pure ty) |]
   case nty of
     -- I think result is always headed by cast bc kind /= *
-    Core.CastTy (Core.TyConApp tc _) _co
+    Core.CastTy (Core.TyConApp tc x) _co
       -> do
         if      getOccString tc == "JSONKind" then return JSONKind
         else if getOccString tc == "PtrKind"  then return PtrKind
-        else                                           error "unexpected kind"
+        else                                       error $ "Couldn't reduce " ++ Ppr.showPprUnsafe (Core.TyConApp tc x) ++ " to JSONKind or PtrKind. Maybe you forgot to use `swiftMarshal`?"
 
     _ -> error "Unexpected, but we could default to JSONKind"
 
