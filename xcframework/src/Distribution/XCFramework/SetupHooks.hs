@@ -10,8 +10,7 @@ import System.Process
 import System.FilePath
 import Distribution.Simple.SetupHooks
 import Distribution.Simple.LocalBuildInfo
-    ( LocalBuildInfo(compiler, hostPlatform),
-      interpretSymbolicPathLBI, withPrograms )
+    ( interpretSymbolicPathLBI, withPrograms )
 -- import Distribution.Simple.BuildPaths (mkSharedLibName)
 import Distribution.Simple.Setup (setupVerbosity)
 import Distribution.Pretty (prettyShow)
