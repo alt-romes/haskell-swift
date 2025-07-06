@@ -2,7 +2,10 @@
 -- | Module to automatically produce a XCFramework binary distribution package
 -- from a Haskell library
 module Distribution.XCFramework.SetupHooks
-  ( SetupHooks, xcframeworkHooks )
+  ( xcframeworkHooks
+
+    -- * Re-exports from Cabal-Hooks
+  , SetupHooks )
   where
 
 import System.IO.Temp
