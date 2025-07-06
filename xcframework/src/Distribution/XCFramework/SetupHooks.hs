@@ -126,8 +126,13 @@ postBuild outFile PostBuildComponentInputs{..} = do
         callCommand cmd
 
   case targetCLBI targetInfo of
-    LibComponentLocalBuildInfo{}
-      -> do_it (mkSharedLibName platform compiler_id uid)
+    l@LibComponentLocalBuildInfo{}
+      -> 
+        -- do_it (mkSharedLibName platform compiler_id uid)
+        -- Does not work, neither with static libraries (mkLibName)
+      putStrLn $
+        "Ignoring xcframeworkHooks for library (but not foreign-lib) component, because libraries are currently unsupported "
+          ++ prettyShow (componentLocalName l)
     FLibComponentLocalBuildInfo{componentLocalName=CFLibName flibName}
       -> do_it ("lib" ++ prettyShow flibName ++ ".dylib")
     other ->
