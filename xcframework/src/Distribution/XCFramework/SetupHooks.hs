@@ -4,7 +4,7 @@
 module Distribution.XCFramework.SetupHooks
   ( xcframeworkHooks
 
-    -- * Re-exports from Cabal-Hooks
+    -- * Re-exports from Cabal-hooks
   , SetupHooks )
   where
 

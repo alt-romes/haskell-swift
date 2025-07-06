@@ -31,8 +31,7 @@ library
 
     -- other-modules:
     -- other-extensions:
-    build-depends:    Cabal-syntax ^>=3.14.2.0,
-                      base >=4.17,
+    build-depends:    base >=4.17,
                       aeson,
                       bytestring,
                       filepath, directory,
@@ -42,6 +41,7 @@ library
                       moat,
                       -- automatic swift lib SetupHooks
                       Cabal-hooks >= 3.14,
+                      Cabal-syntax >=3.14,
                       xcframework,
                       ghc >= 9.10, ghci
     hs-source-dirs:   src
