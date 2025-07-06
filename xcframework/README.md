@@ -40,6 +40,8 @@ setupHooks :: SetupHooks
 setupHooks = xcframeworkHooks "_build/MyHaskellLib.xcframework"
 ```
 
+Now, whenever you run `cabal build`, the libraries will also be bundled into an `.xcframework`.
+
 ## How to use the XCFramework in XCode
 
 In XCode:

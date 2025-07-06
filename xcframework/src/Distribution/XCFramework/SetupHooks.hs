@@ -12,7 +12,7 @@ import Distribution.Simple.SetupHooks
 import Distribution.Simple.LocalBuildInfo
     ( LocalBuildInfo(compiler, hostPlatform),
       interpretSymbolicPathLBI, withPrograms )
-import Distribution.Simple.BuildPaths (mkSharedLibName)
+-- import Distribution.Simple.BuildPaths (mkSharedLibName)
 import Distribution.Simple.Setup (setupVerbosity)
 import Distribution.Pretty (prettyShow)
 import Distribution.Simple.Flag (fromFlag)
@@ -49,10 +49,10 @@ postBuild outFile PostBuildComponentInputs{..} = do
     verbosity = fromFlag $ setupVerbosity $ buildCommonFlags buildFlags
     i = interpretSymbolicPathLBI localBuildInfo
     clbi = targetCLBI targetInfo
-    platform = hostPlatform localBuildInfo
-    compiler = Distribution.Simple.LocalBuildInfo.compiler localBuildInfo
-    compiler_id = compilerId compiler
-    uid = componentUnitId clbi
+    -- platform = hostPlatform localBuildInfo
+    -- compiler = Distribution.Simple.LocalBuildInfo.compiler localBuildInfo
+    -- compiler_id = compilerId compiler
+    -- uid = componentUnitId clbi
     progDb = withPrograms localBuildInfo
 
     do_it libHSname = do
