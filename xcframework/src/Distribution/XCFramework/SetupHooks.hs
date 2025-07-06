@@ -1,7 +1,9 @@
 {-# LANGUAGE RecordWildCards, OverloadedRecordDot #-}
 -- | Module to automatically produce a XCFramework binary distribution package
 -- from a Haskell library
-module Distribution.XCFramework.SetupHooks (xcframeworkHooks) where
+module Distribution.XCFramework.SetupHooks
+  ( SetupHooks, xcframeworkHooks )
+  where
 
 import System.IO.Temp
 import System.Process
