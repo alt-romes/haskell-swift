@@ -2,6 +2,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE TypeFamilies, DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 module Foreign.Swift.Marshal where
 
 import qualified Language.Haskell.TH as TH
@@ -19,6 +20,7 @@ import Moat (ToMoatType, MoatType, prettyMoatType)
 import Control.Monad
 import Data.Proxy
 import Data.Functor.Identity (Identity(..))
+import Control.Exception
 
 class ToSwift a where
   type ForeignResultKind a :: ForeignValKind
@@ -48,7 +50,9 @@ class FromSwift a where
             -> ([String] {-^ Foreign call arguments added by this argument -} -> SwiftCodeGen String) -- ^ Continuation takes encoded arguments
             -> SwiftCodeGen String -- ^ Result is code to encode arguments plus the code returned by the continuation
 
-data ForeignValKind = JSONKind | PtrKind
+data ForeignValKind
+  = JSONKind
+  | PtrKind
   deriving Eq
 
 --------------------------------------------------------------------------------
@@ -75,9 +79,10 @@ getDecoder = return "hs_dec" -- bit wasteful, but let's get this working first.
 -- | Derive a @'ToSwift'@ and @'FromSwift'@ instance.
 swiftMarshal :: ForeignValKind -> TH.Name -> TH.Q [TH.Dec]
 swiftMarshal kind name = do
-  let newty = case kind of
-        JSONKind -> pure $ TH.ConT ''JSONMarshal
-        PtrKind  -> pure $ TH.ConT ''PtrMarshal
+  let
+      viaTy = \case
+        JSONKind -> [t| $(TH.conT ''JSONMarshal) $myty |]
+        PtrKind  -> [t| $(TH.conT ''PtrMarshal) $myty |]
       myty  = pure $ TH.ConT name
 
   satTy <- getSaturatedType name
@@ -91,8 +96,8 @@ swiftMarshal kind name = do
         "Marshaled JSON type doesn't have a Moat instance. Did you forget to derive and yield the Data for "
           ++ TH.pprint (TH.ConT name) ++ "?"
 
-  dvs <- [d| deriving via ($newty $myty) instance (ToSwift $myty)
-             deriving via ($newty $myty) instance (FromSwift $myty)
+  dvs <- [d| deriving via $(viaTy kind) instance (ToSwift $myty)
+             deriving via $(viaTy kind) instance (FromSwift $myty)
            |]
 
   return dvs
@@ -135,6 +140,17 @@ newtype PtrMarshal a = PtrMarshal a
 newtype JSONMarshal a = JSONMarshal a
   deriving newtype (ToJSON, FromJSON)
 
+-- | A newtype to wrap a ToSwift value which causes all exceptions to be
+-- caught on the Haskell side and thrown as Swift exceptions.
+--
+-- @
+-- -- All IO exceptions thrown in f are caught in the foreign export
+-- f :: (FromSwift a, ToSwift b) => a -> CatchExceptionsFFI IO b
+-- @
+newtype CatchExceptionsFFI io a = CatchExceptionsFFI (io a)
+
+--------------------------------------------------------------------------------
+-- JSONMarshal
 --------------------------------------------------------------------------------
 
 instance ToJSON a => ToSwift (JSONMarshal a) where
@@ -205,6 +221,10 @@ instance FromJSON a => FromSwift (JSONMarshal a) where
       }
     |]
 
+--------------------------------------------------------------------------------
+-- PtrMarshal
+--------------------------------------------------------------------------------
+
 instance ToSwift (PtrMarshal a) where
   type ForeignResultKind (PtrMarshal a) = PtrKind
   type FFIResultLit      (PtrMarshal a) = StablePtr a
@@ -229,7 +249,28 @@ instance FromSwift (PtrMarshal a) where
     cont <- getCont [v] -- StablePtr arguments are passed directly to the foreign call
     return cont
 
+--------------------------------------------------------------------------------
+-- CatchExceptionsMarshal
+--------------------------------------------------------------------------------
+
+instance ToSwift a => ToSwift (CatchExceptionsFFI IO a) where
+  type ForeignResultKind (CatchExceptionsFFI IO a) = -- ForeignResultKind (Either SomeException a) ?
+  type FFIResultLit      (CatchExceptionsFFI IO a) = -- FFIResultLit (Either a ?
+  toSwift (CatchExceptionsFFI a) = do
+    r <- (Right <$> a) `catch` (\(e :: SomeException) -> pure (Left e))
+    toSwift r
+  fromHaskell _ ty r getCont =
+    fromHaskell (Proxy @(Either SomeException a)) ty r getCont 
+
+instance (ToSwift a, ToSwift b) => ToSwift (Either a b)
+
+deriving via (PtrMarshal SomeException) instance ToSwift SomeException
+deriving via (PtrMarshal SomeException) instance FromSwift SomeException
+
+--------------------------------------------------------------------------------
 -- Lists
+--------------------------------------------------------------------------------
+
 deriving via (JSONMarshal [a]) instance ToJSON a => ToSwift [a]
 deriving via (JSONMarshal [a]) instance FromJSON a => FromSwift [a]
 
