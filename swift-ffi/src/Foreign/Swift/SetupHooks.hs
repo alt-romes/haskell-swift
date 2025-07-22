@@ -100,7 +100,7 @@ postBuild libName PostBuildComponentInputs{..} = do
     let package = Package(
         name: "#{libName}",
         platforms: [
-            .macOS(.v15)
+            .macOS(.v14)
         ],
         products: [
             .library(name: "#{libName}", targets: ["#{libName}"])
