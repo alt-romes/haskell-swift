@@ -273,14 +273,14 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
       mkHaskellCall fcall_args_acc ((vn, argTy):xs) = do
         let apx = [| Proxy @($(pure argTy)) |] :: Q Exp
         call_args_name <- newName "call_args"
-        [| toHaskell $apx (toMoatType $apx) $(lift vn) $ \ $(varP call_args_name) ->
+        [| toHaskell $apx $(lift vn) $ \ $(varP call_args_name) ->
              $(mkHaskellCall (fcall_args_acc ++ [call_args_name]) xs)
           |]
 
       -- Finally, do the call and wrap result with fromHaskell call
       mkHaskellCall fcall_args_acc [] = do
         let respx = [| Proxy @($(pure origResTy)) |]
-        [| fromHaskell $respx (toMoatType $respx) "foreign_haskell_call_result" $ \res_extra_args ->
+        [| fromHaskell $respx "foreign_haskell_call_result" $ \res_extra_args ->
              fcall ($(foldl (\acc n -> [| $acc ++ $n |]) [| [] |] (map varE fcall_args_acc)) ++ res_extra_args)
           |]
 
