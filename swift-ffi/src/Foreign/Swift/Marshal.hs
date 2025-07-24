@@ -21,11 +21,18 @@ import Control.Monad
 import Data.Proxy
 import Data.Functor.Identity (Identity(..))
 import Control.Exception
+import Data.ByteString.Unsafe (unsafePackCStringLen, unsafeUseAsCStringLen)
 
 class ToSwift a where
-  type ForeignResultKind a :: ForeignValKind
-  type FFIResultLit a :: Type
-  toSwift :: a -> IO (FFIResultLit a)
+  -- | The FFI return type for a foreign exported function returning @a@ 
+  -- TODO: No, how can I get rid of this and the other type family and also of
+  -- 'decodeArg' and 'encodeRes'?? those are making tying the Kind to the
+  -- expected representation way too much
+  type FFIResult a :: Type
+
+  -- | How to convert the @a@ from the original Haskell function into the
+  -- foreign wrapper's result type?
+  toSwift :: IO a -> FFIResult a
 
   -- | The dual side. 'fromHaskell' returns the Swift code that will be
   -- inserted in the Swift foreign wrapper which reads a result from Haskell
@@ -37,9 +44,14 @@ class ToSwift a where
               -> SwiftCodeGen String -- ^ Result is code to decode result plus the code returned by the continuation
 
 class FromSwift a where
-  type ForeignArgKind a :: ForeignValKind
-  type FFIArgLit a :: Type
-  fromSwift :: FFIArgLit a -> IO a
+
+  -- | Attach an FFI argument that can be decoded to @a@ using 'fromSwift' to
+  -- the continuation type
+  type FFIArg a r :: Type
+
+  -- | Marshal a Swift value from the FFI to the original function argument
+  -- type @a@, wrapped in IO, and pass it to the continuation.
+  fromSwift :: forall r. (IO a -> r) -> FFIArg a r
 
   -- | 'toHaskell' returns the Swift code that will be
   -- inserted in the Swift foreign wrapper which encodes a result from Swift
@@ -49,11 +61,6 @@ class FromSwift a where
             -> String -- ^ Argument name
             -> ([String] {-^ Foreign call arguments added by this argument -} -> SwiftCodeGen String) -- ^ Continuation takes encoded arguments
             -> SwiftCodeGen String -- ^ Result is code to encode arguments plus the code returned by the continuation
-
-data ForeignValKind
-  = JSONKind
-  | PtrKind
-  deriving Eq
 
 --------------------------------------------------------------------------------
 -- * Producing Swift code that encodes/decodes values at boundary
@@ -76,6 +83,12 @@ getDecoder = return "hs_dec" -- bit wasteful, but let's get this working first.
 -- * Deriving via via TH
 --------------------------------------------------------------------------------
 
+-- | For choosing how to generate derive instances when using 'swiftMarshal'
+data ForeignValKind
+  = JSONKind
+  | PtrKind
+  deriving Eq
+
 -- | Derive a @'ToSwift'@ and @'FromSwift'@ instance.
 swiftMarshal :: ForeignValKind -> TH.Name -> TH.Q [TH.Dec]
 swiftMarshal kind name = do
@@ -83,7 +96,7 @@ swiftMarshal kind name = do
       viaTy = \case
         JSONKind -> [t| $(TH.conT ''JSONMarshal) $myty |]
         PtrKind  -> [t| $(TH.conT ''PtrMarshal) $myty |]
-      myty  = pure $ TH.ConT name
+      myty  = TH.conT name
 
   satTy <- getSaturatedType name
 
@@ -101,23 +114,6 @@ swiftMarshal kind name = do
            |]
 
   return dvs
-
---------------------------------------------------------------------------------
--- * Construct foreign interface type
---------------------------------------------------------------------------------
-
-type family ForeignTypeOf (a :: Type) :: Type where
-  ForeignTypeOf (b -> c) = AddArg (ForeignArgKind b) b (ForeignTypeOf c)
-  ForeignTypeOf (IO a)   = AddResult (ForeignResultKind a) a
-  ForeignTypeOf a        = AddResult (ForeignResultKind a) a
-
--- See notes about foreign interface with marshaling in "Calling Haskell from Swift" (in my blog)
-type family AddArg (a :: ForeignValKind) (b :: Type) (c :: Type) :: Type where
-  AddArg JSONKind _ c = Ptr CChar -> Int -> c
-  AddArg PtrKind  b c = FFIArgLit b -> c
-type family AddResult (a :: ForeignValKind) (b :: Type) :: Type where
-  AddResult JSONKind b = Ptr CChar -> Ptr Int -> IO ()
-  AddResult PtrKind  b = IO (FFIResultLit b)
 
 --------------------------------------------------------------------------------
 
@@ -154,9 +150,24 @@ newtype CatchExceptionsFFI io a = CatchExceptionsFFI (io a)
 --------------------------------------------------------------------------------
 
 instance ToJSON a => ToSwift (JSONMarshal a) where
-  type ForeignResultKind (JSONMarshal a) = JSONKind
-  type FFIResultLit      (JSONMarshal a) = BS.ByteString
-  toSwift = pure . BS.toStrict . encode
+  type FFIResult (JSONMarshal a) = Ptr CChar -> Ptr Int -> IO ()
+
+  toSwift result buffer sizeptr = do
+    result_bs <- BS.toStrict . encode <$> result
+    unsafeUseAsCStringLen result_bs $ \(ptr,len) -> do
+      size_avail <- peek sizeptr
+      -- Write actual size to intptr
+      -- We always do this, either to see if we've overshot the buffer, or to
+      -- know the size of what has been written.
+      poke sizeptr len
+      if size_avail < len
+         then do
+           -- We need @len@ bytes available
+           -- The caller has to retry
+           return ()
+         else do
+           moveBytes buffer ptr len
+
   fromHaskell _ retType _r{-result value is ignored as the result is read from passed buffers-} getCont = do
     decoder <- getDecoder
     let res_ptr  = "res_ptr"
@@ -174,28 +185,28 @@ instance ToJSON a => ToSwift (JSONMarshal a) where
     return [__i|
       // Allocate buffer for result and allocate a pointer to an int with the initial size of the buffer
       let buf_size = 1024000
-      
+
       return try withUnsafeTemporaryAllocation(of: Int.self, capacity: 1) { size_ptr in
           #{size_ptr}.baseAddress?.pointee = buf_size
-          
+
           do {
               return try withUnsafeTemporaryAllocation(byteCount: buf_size, alignment: 1) { #{res_ptr} in
-                  
+
       #{indent 12 cont}
-                  
+
                   if let required_size = #{size_ptr}.baseAddress?.pointee {
                       if required_size > buf_size {
                           throw HsFFIError.requiredSizeIs(required_size)
                       }
                   }
-          
+
       #{indent 12 decodeAndReturnResult}
               }
           } catch HsFFIError.requiredSizeIs(let required_size) {
               print("Retrying with required size: \\(required_size)")
               return try withUnsafeTemporaryAllocation(byteCount: required_size, alignment: 1) { #{res_ptr} in
                   #{size_ptr}.baseAddress?.pointee = required_size
-                  
+
       #{indent 12 cont}
       #{indent 12 decodeAndReturnResult}
               }
@@ -204,9 +215,12 @@ instance ToJSON a => ToSwift (JSONMarshal a) where
     |]
 
 instance FromJSON a => FromSwift (JSONMarshal a) where
-  type ForeignArgKind (JSONMarshal a) = JSONKind
-  type FFIArgLit      (JSONMarshal a) = BS.ByteString
-  fromSwift b = throwDecodeStrict b
+  type FFIArg (JSONMarshal _) r = Ptr CChar -> Int -> r
+
+  fromSwift :: (IO (JSONMarshal a) -> r) -> (Ptr CChar -> Int -> r)
+  fromSwift k cstr clen =
+    k (unsafePackCStringLen (cstr, clen) >>= throwDecodeStrict)
+
   toHaskell _ _ty v getCont = do
     let v_data    = v ++ "_data"
     let v_datalen = v ++ "_datalen"
@@ -226,11 +240,14 @@ instance FromJSON a => FromSwift (JSONMarshal a) where
 --------------------------------------------------------------------------------
 
 instance ToSwift (PtrMarshal a) where
-  type ForeignResultKind (PtrMarshal a) = PtrKind
-  type FFIResultLit      (PtrMarshal a) = StablePtr a
-  toSwift (PtrMarshal a) = do
+
+  type FFIResult (PtrMarshal a) = IO (StablePtr a)
+
+  toSwift io = do
+    (PtrMarshal a) <- io
     ptr <- newStablePtr a
     pure $ coerce ptr
+
   fromHaskell _ _ty r getCont = do
     -- For a StablePtr, simply return the result of the foreign call
     cont <- getCont []
@@ -240,11 +257,13 @@ instance ToSwift (PtrMarshal a) where
     |]
 
 instance FromSwift (PtrMarshal a) where
-  type ForeignArgKind (PtrMarshal a) = PtrKind
-  type FFIArgLit      (PtrMarshal a) = StablePtr a
-  fromSwift p = do
+  type FFIArg (PtrMarshal a) r = StablePtr a -> r
+
+  fromSwift :: (IO (PtrMarshal a) -> r) -> StablePtr a -> r
+  fromSwift k p = k $ do
     ptr <- deRefStablePtr p
     pure $ coerce ptr
+
   toHaskell _ _ty v getCont = do
     cont <- getCont [v] -- StablePtr arguments are passed directly to the foreign call
     return cont
@@ -253,26 +272,46 @@ instance FromSwift (PtrMarshal a) where
 -- CatchExceptionsMarshal
 --------------------------------------------------------------------------------
 
-instance ToSwift a => ToSwift (CatchExceptionsFFI IO a) where
-  type ForeignResultKind (CatchExceptionsFFI IO a) = -- ForeignResultKind (Either SomeException a) ?
-  type FFIResultLit      (CatchExceptionsFFI IO a) = -- FFIResultLit (Either a ?
-  toSwift (CatchExceptionsFFI a) = do
-    r <- (Right <$> a) `catch` (\(e :: SomeException) -> pure (Left e))
-    toSwift r
-  fromHaskell _ ty r getCont =
-    fromHaskell (Proxy @(Either SomeException a)) ty r getCont 
-
-instance (ToSwift a, ToSwift b) => ToSwift (Either a b)
-
-deriving via (PtrMarshal SomeException) instance ToSwift SomeException
-deriving via (PtrMarshal SomeException) instance FromSwift SomeException
+-- instance ToSwift a => ToSwift (CatchExceptionsFFI IO a) where
+--   type ForeignResultKind (CatchExceptionsFFI IO a) = -- ForeignResultKind (Either SomeException a) ?
+--   type FFIResultLit      (CatchExceptionsFFI IO a) = -- FFIResultLit (Either a ?
+--   toSwift (CatchExceptionsFFI a) = do
+--     r <- (Right <$> a) `catch` (\(e :: SomeException) -> pure (Left e))
+--     toSwift r
+--   fromHaskell _ ty r getCont =
+--     fromHaskell (Proxy @(Either SomeException a)) ty r getCont
+--
+-- instance (ToSwift a, ToSwift b) => ToSwift (Either a b)
 
 --------------------------------------------------------------------------------
+-- ToSwift/FromSwift base instances
+--------------------------------------------------------------------------------
+
+instance (ToSwift b) => ToSwift (IO b) where
+  type FFIResult (IO b) = FFIResult b
+  toSwift = toSwift . join
+
+  fromHaskell = error "todo: as below:"
+
+instance (FromSwift a, ToSwift b) => ToSwift (a -> b) where
+  type FFIResult (a -> b) = FFIArg a (FFIResult b)
+
+  toSwift iof =
+    fromSwift @a @(FFIResult b) $ \ioa ->
+      toSwift @b $ do
+        f <- iof
+        a <- ioa
+        return $ f a
+
+  fromHaskell = error "todo: currently we bypass calling this bc 'yieldFunction' calls the args and results directly"
+
 -- Lists
---------------------------------------------------------------------------------
-
 deriving via (JSONMarshal [a]) instance ToJSON a => ToSwift [a]
 deriving via (JSONMarshal [a]) instance FromJSON a => FromSwift [a]
+
+-- SomeException
+deriving via (PtrMarshal SomeException) instance ToSwift SomeException
+deriving via (PtrMarshal SomeException) instance FromSwift SomeException
 
 --------------------------------------------------------------------------------
 -- Utils

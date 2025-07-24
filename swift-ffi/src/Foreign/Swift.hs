@@ -89,40 +89,17 @@ foreignExportSwift :: Name -> Q [Dec]
 foreignExportSwift fun_name = do
   let wrapper_name_str = 'h':nameBase fun_name
       wrapper_name = mkName wrapper_name_str
-  callresult_name <- newName "callresult"
   origin_ty <- reifyType fun_name
-  (foreign_ty, normalized_ty) <- makeWrapperTy origin_ty
+  foreign_ty <- makeWrapperTy origin_ty
 
   let
     fexp = ForeignD $ ExportF CCall wrapper_name_str wrapper_name foreign_ty
     fsig = SigD wrapper_name foreign_ty
 
-  let
-      -- to make arg variables for the wrapper
-      (wrapperArgsTy, _wrapperResTy) = tyFunSplitCoreTy normalized_ty
-      wrapperTyArity  = length wrapperArgsTy
+  let (origArgsTy, origResTy) = tyFunSplitTy origin_ty
 
-      (origArgsTy, origResTy) = tyFunSplitTy origin_ty
-      origTyArity  = length origArgsTy
-
-  -- Vars of original function
-  orgVars <- mapM (const $ newName "orig")
-                  [1..origTyArity]
-
-  -- Vars of the wrapper function
-  -- We make no assumptions about how results are returned (serialized vs
-  -- directly), we simply allocate names for every argument to the wrapper
-  -- function, and take them on demand when constructing the function body.
-  wrapperVars <- mapM (const $ newName "wrap")
-                  [1..wrapperTyArity]
-
-  fun <- FunD wrapper_name . (:[]) . (\b -> Clause (map VarP wrapperVars) (NormalB b) []) . DoE Nothing <$> do
-    buildBodyWithArgs wrapperVars $ do
-      binds <- zipWithM decodeArg orgVars origArgsTy
-      let applyF = foldl AppE (VarE fun_name) (map VarE orgVars)
-          resultBind = BindS (VarP callresult_name) applyF
-      final <- encodeRes origResTy callresult_name
-      return (binds++[resultBind]++[NoBindS final])
+  wrapper_body <- [| toSwift (pure $(varE fun_name)) |]
+  let fun = FunD wrapper_name ([Clause [] (NormalB wrapper_body) []])
 
   gens <- genSwiftActionAndAnn (yieldFunction (origArgsTy, stripTyIO origResTy) (nameBase fun_name) wrapper_name_str) fun_name (dropResultIO origin_ty) [|| ExportSwiftFunction ||]
 
@@ -172,57 +149,6 @@ needArgs n = BodyBuilder $ do
 -- Encoding and Decoding arguments
 --------------------------------------------------------------------------------
 
--- | Decodes an argument from the wrapper functions and binds it to the name of
--- the original argument (to eventually pass to the function call that we are
--- wrapping)
-decodeArg :: Name
-          -- ^ The name to which the decoded argument should be bound
-          -> Type
-          -- ^ The type of the decoded argument
-          -> BodyBuilder Stmt
-decodeArg orig ty = do
-  liftBB (foreignArgKind ty) >>= \case
-    PtrKind -> do
-      -- Stable pointers
-      [stable_ptr] <- needArgs 1
-      BindS (VarP orig) <$> [| fromSwift $(varE stable_ptr) |]
-    JSONKind -> do
-      -- Decode using JSON
-      [cstr, clen] <- needArgs 2
-      BindS (VarP orig) <$> [| unsafePackCStringLen ($(varE cstr), $(varE clen)) >>= fromSwift |]
-
-
--- | Encodes the result from the wrapped function into the wrapper's return format.
--- For most data types, the result will be serialized into the final two arguments.
--- However, some, like 'StablePtr', will be simply returned.
-encodeRes :: Type
-          -- ^ The original function's return type
-          -> Name
-          -- ^ The name to which the result of evaluating the wrapped function is bound
-          -> BodyBuilder Exp
-encodeRes ty callresult_name = do
-  liftBB (foreignResultKind ty) >>= \case
-    PtrKind ->
-      -- StablePtrs are simply returned
-      [| toSwift $(varE callresult_name) |]
-    JSONKind -> do
-      -- In all other cases try to serialize the result
-      [buffer, sizeptr] <- needArgs 2
-      [| (toSwift $(varE callresult_name) >>=) $ \bs -> unsafeUseAsCStringLen bs $ \(ptr,len) -> do
-            size_avail <- peek $(varE sizeptr)
-            -- Write actual size to intptr
-            -- We always do this, either to see if we've overshot the buffer, or to
-            -- know the size of what has been written.
-            poke $(varE sizeptr) len
-            if size_avail < len
-               then do
-                 -- We need @len@ bytes available
-                 -- The caller has to retry
-                 return ()
-               else do
-                 moveBytes $(varE buffer) ptr len
-       |]
-
 --------------------------------------------------------------------------------
 -- Foreign exported types
 --------------------------------------------------------------------------------
@@ -232,30 +158,11 @@ encodeRes ty callresult_name = do
 --
 -- The implementation simply uses the 'ForeignTypeOf' type family to determine
 -- the final foreign export signature. 
-makeWrapperTy :: Type -> Q (Type, Core.Type)
+makeWrapperTy :: Type -> Q (Type {-, Core.Type -})
 makeWrapperTy ty = do
-  fty <- [t| ForeignTypeOf $(pure ty) |]
-  normal_fty <- normaliseTy fty
-  return (fty, normal_fty)
-
-foreignArgKind :: Type -> Q ForeignValKind
-foreignArgKind ty = foreignValKind [t| ForeignArgKind |] ty
-
-foreignResultKind :: Type -> Q ForeignValKind
-foreignResultKind (stripTyIO -> ty) = foreignValKind [t| ForeignResultKind |] ty
-
-foreignValKind :: Q Type -> Type -> Q ForeignValKind
-foreignValKind con ty = do
-  nty <- normaliseTy =<< [t| $con $(pure ty) |]
-  case nty of
-    -- I think result is always headed by cast bc kind /= *
-    Core.CastTy (Core.TyConApp tc x) _co
-      -> do
-        if      getOccString tc == "JSONKind" then return JSONKind
-        else if getOccString tc == "PtrKind"  then return PtrKind
-        else                                       error $ "Couldn't reduce " ++ Ppr.showPprUnsafe (Core.TyConApp tc x) ++ " to JSONKind or PtrKind. Maybe you forgot to use `swiftMarshal`?"
-
-    _ -> error "Unexpected, but we could default to JSONKind"
+  fty <- [t| FFIResult $(pure ty) |]
+  -- normal_fty <- normaliseTy fty
+  return (fty {-, normal_fty -})
 
 --------------------------------------------------------------------------------
 -- Utils
