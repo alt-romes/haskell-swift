@@ -292,7 +292,7 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
           splitRetMoatTy (args, r) (Moat.App arg c) = splitRetMoatTy (arg:args, r) c
           splitRetMoatTy (args, _) ret = (reverse args, ret)
 
-      (swiftParams) <- liftIO $ zipWithM prettyParam [1..] argTys
+      swiftParams <- liftIO $ zipWithM prettyParam [1..] argTys
 
       let fcall fargs = SwiftCodeGen $
             "var foreign_haskell_call_result = "
