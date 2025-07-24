@@ -68,6 +68,10 @@ postBuild libName PostBuildComponentInputs{..} = do
       , "    case decodingFailed(String, Error)"
       , "}"
       , ""
+      , "public enum HaskellException: Error {"
+      , "    case exception(String)"
+      , "}"
+      , ""
       ]
 
   -- TODO: Put each module in a separate folder with the same name of the
