@@ -299,12 +299,12 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
             "var foreign_haskell_call_result = "
                     ++ $(lift wrapper_name)
                     ++ "(" ++ concat (intersperse ", " fargs) ++ ")"
-      let (fbody, Monoid.Any throwsHsExcp) = getSwiftCodeGen $(mkHaskellCall [] (zip (map (('v':) . show) [(1::Int)..]) origArgsTy))
+      let (fbody, throwsHsExcp) = getSwiftCodeGen $(mkHaskellCall [] (zip (map (('v':) . show) [(1::Int)..]) origArgsTy))
 
       return $ unlines $
         [ -- let's just do it inline rather than -- "@ForeignImportHaskell"
           "public func " ++ $(litE $ StringL orig_name) ++ "(" ++ concat (intersperse ", " swiftParams) ++ ")"
-                  ++ (if throwsHsExcp then " throws(HaskellException) " else "") ++ " -> " ++ prettyMoatType retTy
+                  ++ (if Monoid.getAny throwsHsExcp then " throws(HaskellException) " else "") ++ " -> " ++ prettyMoatType retTy
         , "{"
         ]
         ++
@@ -316,9 +316,16 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
         , indent 4 fbody
         , "  } catch HsFFIError.decodingFailed(let data, let error) {"
         , "    fatalError(\"Error decoding Haskell data \\(data). Failed with \\(error)\")"
-        , "  } catch HaskellException.exception(let data) {"
-        , "    throw HaskellException.exception(data) // rethrows"
-        , "  } catch {"
+        ]
+        ++
+        [ unlines $
+          [ "  } catch HaskellException.exception(let data) {"
+          , "    throw HaskellException.exception(data) // rethrows"
+          ]
+        | Monoid.getAny throwsHsExcp
+        ]
+        ++
+        [ "  } catch {"
         , "    fatalError(\"Unknown error in foreign Haskell marshal: \\(error)\")"
         , "  }"
         ]
