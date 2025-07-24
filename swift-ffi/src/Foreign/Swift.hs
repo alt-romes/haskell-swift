@@ -218,8 +218,10 @@ tyFunSplitCoreTy Core.FunTy{Core.ft_arg, Core.ft_res} = first (ft_arg:) (tyFunSp
 tyFunSplitCoreTy (Core.ForAllTy _ c) = tyFunSplitCoreTy c
 tyFunSplitCoreTy r = ([], r)
 
---- | Remove an IO tycon from the given type
+--- | Remove an IO tycon from the return of the given type
 stripTyIO :: Type -> Type
+stripTyIO (AppT (AppT ArrowT a) b) = AppT (AppT ArrowT a) (stripTyIO b)
+stripTyIO (ForallT x y c) = ForallT x y (stripTyIO c)
 stripTyIO (AppT (ConT n) t) | n == ''IO = t
 stripTyIO t = t
 
