@@ -46,6 +46,7 @@ import qualified GHC.Unit.Home.Graph as HUG
 #endif
 import qualified Language.Haskell.TH as TH (Name)
 import qualified Data.Char as Char
+import qualified Data.Monoid as Monoid
 
 data SwiftExport = ExportSwiftData (String {- tycon name -})
                  | ExportSwiftFunction
@@ -294,16 +295,16 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
 
       swiftParams <- liftIO $ zipWithM prettyParam [1..] argTys
 
-      let fcall fargs = SwiftCodeGen $
+      let fcall fargs = pure $
             "var foreign_haskell_call_result = "
                     ++ $(lift wrapper_name)
                     ++ "(" ++ concat (intersperse ", " fargs) ++ ")"
-      let fbody = getSwiftCodeGen $(mkHaskellCall [] (zip (map (('v':) . show) [(1::Int)..]) origArgsTy))
+      let (fbody, Monoid.Any throwsHsExcp) = getSwiftCodeGen $(mkHaskellCall [] (zip (map (('v':) . show) [(1::Int)..]) origArgsTy))
 
       return $ unlines $
         [ -- let's just do it inline rather than -- "@ForeignImportHaskell"
           "public func " ++ $(litE $ StringL orig_name) ++ "(" ++ concat (intersperse ", " swiftParams) ++ ")"
-                  ++ " -> " ++ prettyMoatType retTy
+                  ++ (if throwsHsExcp then " throws(HaskellException) " else "") ++ " -> " ++ prettyMoatType retTy
         , "{"
         ]
         ++
@@ -315,6 +316,8 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
         , indent 4 fbody
         , "  } catch HsFFIError.decodingFailed(let data, let error) {"
         , "    fatalError(\"Error decoding Haskell data \\(data). Failed with \\(error)\")"
+        , "  } catch HaskellException.exception(let data) {"
+        , "    throw HaskellException.exception(data) // rethrows"
         , "  } catch {"
         , "    fatalError(\"Unknown error in foreign Haskell marshal: \\(error)\")"
         , "  }"

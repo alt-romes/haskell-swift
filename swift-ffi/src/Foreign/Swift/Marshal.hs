@@ -23,6 +23,8 @@ import Data.Proxy
 import Data.Functor.Identity (Identity(..))
 import Control.Exception
 import Data.ByteString.Unsafe (unsafePackCStringLen, unsafeUseAsCStringLen)
+import qualified Data.Monoid as Monoid
+import Control.Monad.Writer
 
 class ToMoatType a => ToSwift a where
   -- | The FFI return type for a foreign exported function returning @a@ 
@@ -65,9 +67,8 @@ class ToMoatType a => FromSwift a where
 -- * Producing Swift code that encodes/decodes values at boundary
 --------------------------------------------------------------------------------
 
-newtype SwiftCodeGen a = SwiftCodeGen { getSwiftCodeGen :: a }
-  deriving (Functor, Applicative, Monad) via Identity
-    -- currently it does nothing...!
+newtype SwiftCodeGen a = SwiftCodeGen { getSwiftCodeGen :: (a, Monoid.Any) }
+  deriving (Functor, Applicative, Monad, MonadWriter Monoid.Any) via Writer Monoid.Any
 
 -- | Get the variable name for the shared JSON encoder
 -- (One only gets produced if it is used in the code)
@@ -77,6 +78,10 @@ getEncoder = return "hs_enc" -- for now, always generate the encoder and decoder
 -- | Like 'getEncoder' but for a @JSONDecoder@
 getDecoder :: SwiftCodeGen String
 getDecoder = return "hs_dec" -- bit wasteful, but let's get this working first.
+
+-- | Marks the Swift function with @throws(HaskellException)@
+registerThrowsHsException :: SwiftCodeGen ()
+registerThrowsHsException = tell (Monoid.Any True)
 
 --------------------------------------------------------------------------------
 -- * Deriving via via TH
@@ -143,7 +148,7 @@ newtype JSONMarshal a = JSONMarshal a
 -- -- All IO exceptions thrown in f are caught in the foreign export
 -- f :: (FromSwift a, ToSwift b) => a -> CatchExceptionsFFI IO b
 -- @
-newtype CatchExceptionsFFI io a = CatchExceptionsFFI (io a)
+newtype CatchFFI io a = CatchFFI (io a)
   deriving newtype (ToMoatType)
 
 --------------------------------------------------------------------------------
@@ -275,17 +280,17 @@ instance ToMoatType a => FromSwift (PtrMarshal a) where
     return cont
 
 --------------------------------------------------------------------------------
--- CatchExceptionsMarshal
+-- Catch exceptions
 --------------------------------------------------------------------------------
 
-instance (ToMoatType a, ToSwift a) => ToSwift (CatchExceptionsFFI IO a) where
-  type FFIResult (CatchExceptionsFFI IO a) =
+instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
+  type FFIResult (CatchFFI IO a) =
         Ptr (StablePtr SomeException) {-^ nullptr if no exception -} -> FFIResult a
 
-  toSwift :: IO (CatchExceptionsFFI IO a) -> Ptr (StablePtr SomeException) -> FFIResult a
+  toSwift :: IO (CatchFFI IO a) -> Ptr (StablePtr SomeException) -> FFIResult a
   toSwift io_io_a exceptptr =
     toSwift @a $ do
-      CatchExceptionsFFI io_a <- io_io_a
+      CatchFFI io_a <- io_io_a
       r <- (Right <$> io_a) `catch` (\(e :: SomeException) -> pure (Left e))
       case r of
         Left e -> do
@@ -297,20 +302,21 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchExceptionsFFI IO a) where
 
   -- pass an exception ptr and make sure to check it before calling fromHaskell on the proper result
   fromHaskell _ r getCont = do
+    registerThrowsHsException
     fromHaskell (Proxy @a) r $ \args -> do
       cont <- getCont $ ["except_ptr.baseAddress"] ++ args
       return [__i|
-        try withUnsafeTemporaryAllocation(of: UnsafeRawPointer.self, capacity: 1) { except_ptr in
+        try withUnsafeTemporaryAllocation(of: UnsafeMutableRawBufferPointer.self, capacity: 1) { except_ptr in
       #{indent 4 cont}
           if let exception_result = except_ptr.baseAddress?.pointee {
             if exception_result != nil {
-              fatalError("Foreign function returned non-null exception pointer: \\(exception_result)")
+              throw HaskellException.exception("\\(except_ptr)")
             }
           }
         }
       |]
 
--- | When an exception is caught by 'CatchExceptionsFFI', we write the 'Ptr' to
+-- | When an exception is caught by 'CatchFFI, we write the 'Ptr' to
 -- the exception and then throw from the IO action a 'CatchExceptionsFFICaught'
 -- exception. The 'toSwift' base instances should catch this exception and
 -- return a dummy value in the FFI.
@@ -339,7 +345,7 @@ instance (FromSwift a, ToSwift b) => ToSwift (a -> b) where
         a <- ioa
         return $ f a
 
-  fromHaskell _ resName getCont = error "Still done in 'yieldFunction; we should never reach this'"
+  fromHaskell _ _ _ = error "Still done in 'yieldFunction; we should never reach this'"
   --   toHaskell (Proxy @b) _ _
   --   fromHaskell (Proxy @a) _ _
   --   _
