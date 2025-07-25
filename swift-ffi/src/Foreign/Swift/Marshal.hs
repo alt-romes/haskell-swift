@@ -340,7 +340,7 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
             {
               let exception_string = String(cString: exception_cstring)
               // String(cString: ...) copies the bytes, so free the Haskell string afterwards
-              free(exception_cstring as! UnsafeMutableRawPointer) // uses stdlib malloc's free, matching the allocation
+              free(UnsafeMutableRawPointer(mutating: exception_cstring)) // uses stdlib malloc's free, matching the allocation
 
               if !exception_string.isEmpty {
                 // Exception result is a non-nil string, therefore an exception was thrown
