@@ -383,13 +383,44 @@ instance (FromSwift a, ToSwift b) => ToSwift (a -> b) where
       fromHaskell (Proxy @b) $ \args_added_by_b ->
         getCall (args_added_by_a ++ args_added_by_b)
 
+-- ()
+instance ToSwift () where
+  type FFIResult () = IO ()
+
+  toSwift ioa = do
+    () <- ioa
+    pure ()
+
+  fromHaskell _ getCall = do
+    -- Just do the call and return ()
+    cont <- getCall []
+    return [__i|
+      #{cont}
+      return ()
+    |]
+    
+
 -- Lists
 deriving via (JSONMarshal [a]) instance (ToMoatType a, ToJSON a) => ToSwift [a]
 deriving via (JSONMarshal [a]) instance (ToMoatType a, FromJSON a) => FromSwift [a]
 
--- SomeException
--- deriving via (PtrMarshal SomeException) instance ToSwift SomeException
--- deriving via (PtrMarshal SomeException) instance FromSwift SomeException
+-- StablePtr
+deriving via (PtrMarshal (StablePtr ())) instance ToSwift (StablePtr ())
+deriving via (PtrMarshal (StablePtr ())) instance FromSwift (StablePtr ())
+
+-- Ptr
+deriving via (PtrMarshal (Ptr ())) instance ToSwift (Ptr ())
+deriving via (PtrMarshal (Ptr ())) instance FromSwift (Ptr ())
+
+--------------------------------------------------------------------------------
+-- ToMoatType orphans
+--------------------------------------------------------------------------------
+
+instance ToMoatType (StablePtr a) where
+  toMoatType _ = unsafeMutableRawPointerType
+
+instance ToMoatType (Ptr a) where
+  toMoatType _ = unsafeMutableRawPointerType
 
 -- | Treat an IO wrapped type transparently as the underlying type
 instance ToMoatType a => ToMoatType (IO a) where
@@ -401,3 +432,7 @@ instance ToMoatType a => ToMoatType (IO a) where
 
 indent :: Int -> String -> String
 indent n = unlines . map (replicate n ' ' ++) . lines
+
+unsafeMutableRawPointerType :: MoatType
+unsafeMutableRawPointerType = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
+

@@ -371,6 +371,3 @@ isOptional :: MoatType -> Bool
 isOptional (Optional _) = True
 isOptional _ = False
 
-unsafeMutableRawPointerType :: MoatType
-unsafeMutableRawPointerType = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
-
