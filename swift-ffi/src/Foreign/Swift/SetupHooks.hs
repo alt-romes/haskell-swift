@@ -84,6 +84,18 @@ postBuild libName PostBuildComponentInputs{..} = do
       , "    case exception(String)"
       , "}"
       , ""
+      , "public class HaskellPointer {"
+      , "  let ptr: HsStablePtr"
+      , ""
+      , "  init(ptr: HsStablePtr) {"
+      , "    self.ptr = ptr"
+      , "  }"
+      , ""
+      , "  deinit {"
+      , "      print(\"Freeing Haskell stable pointer!\")"
+      , "      hs_free_stable_ptr(ptr)"
+      , "  }"
+      , "}"
       ]
 
   -- TODO: Put each module in a separate folder with the same name of the

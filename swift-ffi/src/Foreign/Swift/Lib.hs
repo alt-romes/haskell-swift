@@ -231,7 +231,7 @@ swiftPtr name = do
           { aliasName = $(lift $ nameBase name)
           , aliasDoc = Nothing -- todo
           , aliasTyVars = [] -- todo
-          , aliasTyp = unsafeMutableRawPointerType
+          , aliasTyp = moatHaskellPointer
           }
     |]
   gens <- genSwiftActionAndAnn (yieldType typWithUnits) name [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]

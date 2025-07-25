@@ -288,7 +288,7 @@ instance ToMoatType a => ToSwift (PtrMarshal a) where
     cont <- getCall []
     return [__i|
       #{cont}
-      return #{ret_name}!
+      return HaskellPointer(ptr: #{ret_name}!)
     |]
 
 instance ToMoatType a => FromSwift (PtrMarshal a) where
@@ -301,7 +301,7 @@ instance ToMoatType a => FromSwift (PtrMarshal a) where
 
   toHaskell _ getCall = do
     v    <- nextVar
-    cont <- getCall [v] -- StablePtr arguments are passed directly to the foreign call
+    cont <- getCall [v ++ ".ptr"] -- StablePtr arguments must simply be unwrapped from HaskellPointer
     return cont
 
 --------------------------------------------------------------------------------
@@ -427,10 +427,10 @@ deriving via (PtrMarshal (Ptr ())) instance FromSwift (Ptr ())
 --------------------------------------------------------------------------------
 
 instance ToMoatType (StablePtr a) where
-  toMoatType _ = unsafeMutableRawPointerType
+  toMoatType _ = moatHaskellPointer
 
 instance ToMoatType (Ptr a) where
-  toMoatType _ = unsafeMutableRawPointerType
+  toMoatType _ = moatHaskellPointer
 
 -- | Treat an IO wrapped type transparently as the underlying type
 instance ToMoatType a => ToMoatType (IO a) where
@@ -443,6 +443,12 @@ instance ToMoatType a => ToMoatType (IO a) where
 indent :: Int -> String -> String
 indent n = unlines . map (replicate n ' ' ++) . lines
 
-unsafeMutableRawPointerType :: MoatType
-unsafeMutableRawPointerType = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
+-- unsafeMutableRawPointerType :: MoatType
+-- unsafeMutableRawPointerType = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
+
+-- | A HaskellPointer type is a class which wraps a StablePtr but which has a
+-- deinitalizer which will free the stablepointer when there are no more
+-- references to it. It's inserted into the commons Swift module by Foreign.Swift.SetupHooks
+moatHaskellPointer :: MoatType
+moatHaskellPointer = Concrete { concreteName = "HaskellPointer", concreteTyVars = [] }
 
