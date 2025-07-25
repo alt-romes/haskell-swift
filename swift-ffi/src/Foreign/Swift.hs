@@ -20,11 +20,7 @@ import Foreign.Swift.Marshal
 import Foreign.Swift.Lib
 
 import Control.Monad.State
-import Foreign.Marshal
 import Language.Haskell.TH
-import Control.Monad
-import Data.ByteString.Unsafe
-import Foreign.Storable
 
 import GHC.Tc.Gen.Splice () -- Quasi TcM
 
@@ -44,11 +40,8 @@ import GHC.Tc.Gen.HsType (tcCheckLHsTypeInContext, ContextKind (..))
 import GHC.Tc.Gen.HsType (tcCheckLHsType, ContextKind (..))
 #endif
 import qualified GHC.Tc.Utils.TcType as Core
-import qualified GHC.Core.TyCo.Rep as Core
-import Data.Bifunctor (Bifunctor(..))
 import GHC.Core.Coercion (Role(Nominal))
 import GHC.Core.Reduction (Reduction(..))
-import GHC.Types.Name (getOccString)
 import qualified GHC.Tc.Utils.Monad as TcM
 import Data.IORef
 
@@ -96,58 +89,12 @@ foreignExportSwift fun_name = do
     fexp = ForeignD $ ExportF CCall wrapper_name_str wrapper_name foreign_ty
     fsig = SigD wrapper_name foreign_ty
 
-  let (origArgsTy, origResTy) = tyFunSplitTy origin_ty
-
   wrapper_body <- [| toSwift (pure $(varE fun_name)) |]
   let fun = FunD wrapper_name ([Clause [] (NormalB wrapper_body) []])
 
   gens <- genSwiftActionAndAnn (yieldFunction origin_ty (nameBase fun_name) wrapper_name_str) fun_name [|| ExportSwiftFunction ||]
 
   return ([fsig, fun, fexp] ++ gens)
-
---------------------------------------------------------------------------------
--- Foreign-wrapper builder monad
---------------------------------------------------------------------------------
-
--- | A monad that helps build the body of the foreign function wrapper that is
--- exposed.
---
--- In essence, the number of arguments the wrapper receives for each argument
--- of the original function and return result depend on the types of these
--- arguments, so, when constructing a result or reading an argument, we must
--- lazily take in order the amount of variables we expect to be available to
--- the function to convert that single argument from the list of function
--- arguments.
---
--- By the time we handled all arguments and result the list of allocated names
--- for the foreign function wrapper should be empty.
-newtype BodyBuilder a = BodyBuilder (StateT [Name] Q a)
-  deriving newtype (Functor, Applicative, Monad, MonadFail)
-
-liftBB :: Q a -> BodyBuilder a
-liftBB = BodyBuilder . lift
-
-instance Quote BodyBuilder where
-  newName = liftBB . newName
-
--- | Run a body building action with the given allocated foreign wrapper
--- functions.  By the time we are done body building, we should have used
--- exactly all allocated names.
-buildBodyWithArgs :: [Name] -> BodyBuilder a -> Q a
-buildBodyWithArgs names (BodyBuilder bb) = do
-  (a, []) <- runStateT bb names
-  return a
-
--- | Take @N@ arguments from the arguments allocated for the foreign wrapper function
-needArgs :: Int -> BodyBuilder [Name]
-needArgs n = BodyBuilder $ do
-  needed <- gets (take n)
-  modify (drop n)
-  return needed
-
---------------------------------------------------------------------------------
--- Encoding and Decoding arguments
---------------------------------------------------------------------------------
 
 --------------------------------------------------------------------------------
 -- Foreign exported types
@@ -203,25 +150,7 @@ normaliseTy ty = unsafeRunTcM $ do
       generatedOrigin :: Origin
       generatedOrigin = Generated OtherExpansion DoPmc
 
--- | Right...
+-- -- | Right...
 unsafeRunTcM :: TcM a -> Q a
 unsafeRunTcM m = unsafeCoerce (\_ -> m)
-
--- | Extract the types of each argument of the given function type into a list and the result type separate
-tyFunSplitTy :: Type -> ([Type], Type)
-tyFunSplitTy (AppT (AppT ArrowT a) b) = first (a:) (tyFunSplitTy b)
-tyFunSplitTy (ForallT _ _ c) = tyFunSplitTy c -- ghmm..
-tyFunSplitTy r = ([], r)
-
-tyFunSplitCoreTy :: Core.Type -> ([Core.Type], Core.Type)
-tyFunSplitCoreTy Core.FunTy{Core.ft_arg, Core.ft_res} = first (ft_arg:) (tyFunSplitCoreTy ft_res)
-tyFunSplitCoreTy (Core.ForAllTy _ c) = tyFunSplitCoreTy c
-tyFunSplitCoreTy r = ([], r)
-
---- | Remove an IO tycon from the return of the given type
-stripTyIO :: Type -> Type
-stripTyIO (AppT (AppT ArrowT a) b) = AppT (AppT ArrowT a) (stripTyIO b)
-stripTyIO (ForallT x y c) = ForallT x y (stripTyIO c)
-stripTyIO (AppT (ConT n) t) | n == ''IO = t
-stripTyIO t = t
 
