@@ -205,7 +205,7 @@ swiftDataWith moatopts name = do
   fromJSON <- if hasFromJSON then pure []
               else Aeson.deriveFromJSON aesonDefaultOptions name
 
-  gens <- genSwiftActionAndAnn yieldType name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
+  gens <- genSwiftActionAndAnn (yieldType typWithUnits) name [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
 
   return (mg ++ toJSON ++ fromJSON ++ gens)
 
@@ -234,27 +234,27 @@ swiftPtr name = do
           , aliasTyp = unsafeMutableRawPointerType
           }
     |]
-  gens <- genSwiftActionAndAnn yieldType name typWithUnits [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
+  gens <- genSwiftActionAndAnn (yieldType typWithUnits) name [|| ExportSwiftData $$(unsafeCodeCoerce [| $(litE $ StringL $ nameBase name) |]) ||]
   return (insts ++ gens)
 
 
 -- | Output a Swift datatype declaration to a file using the current module
 -- name as the filename.
-yieldType :: Q Exp -- ^ Proxy @ty expression
+yieldType :: TH.Type
           -> Q Exp
 yieldType prx = do
-  outputCode [| pure $ generateSwiftCode $prx ++ "\n" |]
+  outputCode [| pure $ generateSwiftCode (Proxy @($(pure prx))) ++ "\n" |]
 
 -- | Generate an IO action which, when run, will generate swift code and output
 -- it to a file.
 -- It also attaches an annotation pragma so the plugin can find this action and run it.
-genSwiftActionAndAnn :: (Q Exp -> Q Exp) -> TH.Name -> TH.Type -> Code Q SwiftExport -> Q [Dec]
-genSwiftActionAndAnn yielding name ty exportAnn = do
+genSwiftActionAndAnn :: Q Exp -> TH.Name -> Code Q SwiftExport -> Q [Dec]
+genSwiftActionAndAnn yielding name exportAnn = do
   genName <- newName ("gen_swift_" ++ nameBase name)
   ann <- AnnP (ValueAnnotation genName) <$> unTypeCode exportAnn
   -- The generated function which outputs Swift code is going to be run by the plugin
   genFunSig <- TH.SigD genName <$> [t| IO () |]
-  genFunBody <- yielding [| Proxy @($(pure ty)) |]
+  genFunBody <- yielding
   let genFun = FunD genName [Clause [] (NormalB genFunBody) []]
   return [genFun, genFunSig, PragmaD ann]
 
@@ -263,32 +263,16 @@ genSwiftActionAndAnn yielding name ty exportAnn = do
 --------------------------------------------------------------------------------
 
 -- | Yield a Haskell function as Swift code wrapping a foreign call.
-yieldFunction :: ([TH.Type], TH.Type) -- ^ The original type (without return IO)
+yieldFunction :: TH.Type -- ^ Original function type
               -> String -- ^ Original function name
               -> String -- ^ Wrapper function name
-              -> Q Exp  -- ^ Proxy @ty expr
               -> Q Exp
-yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
-  let mkHaskellCall :: [TH.Name{-acc fcall args names-}] -> [(String{-var name-}, TH.Type{-arg ty-})] -> Q Exp
-      -- Add argument
-      mkHaskellCall fcall_args_acc ((vn, argTy):xs) = do
-        let apx = [| Proxy @($(pure argTy)) |] :: Q Exp
-        call_args_name <- newName "call_args"
-        [| toHaskell $apx $(lift vn) $ \ $(varP call_args_name) ->
-             $(mkHaskellCall (fcall_args_acc ++ [call_args_name]) xs)
-          |]
-
-      -- Finally, do the call and wrap result with fromHaskell call
-      mkHaskellCall fcall_args_acc [] = do
-        let respx = [| Proxy @($(pure origResTy)) |]
-        [| fromHaskell $respx "foreign_haskell_call_result" $ \res_extra_args ->
-             fcall ($(foldl (\acc n -> [| $acc ++ $n |]) [| [] |] (map varE fcall_args_acc)) ++ res_extra_args)
-          |]
+yieldFunction orig_ty orig_name wrapper_name = do
 
   outputCode [|
     do
-      let moatTy = toMoatType $(prx)
-          -- moatData = toMoatData $(prx)
+      let moatTy = toMoatType (Proxy @($(pure $ dropResultIO orig_ty)))
+          -- moatData = toMoatData (Proxy @($(stripTyIO prx))
           (argTys, retTy) = splitRetMoatTy ([], undefined) moatTy
           splitRetMoatTy (args, r) (Moat.App arg c) = splitRetMoatTy (arg:args, r) c
           splitRetMoatTy (args, _) ret = (reverse args, ret)
@@ -299,7 +283,8 @@ yieldFunction (origArgsTy, origResTy) orig_name wrapper_name prx = do
             "var foreign_haskell_call_result = "
                     ++ $(lift wrapper_name)
                     ++ "(" ++ concat (intersperse ", " fargs) ++ ")"
-      let (fbody, throwsHsExcp) = getSwiftCodeGen $(mkHaskellCall [] (zip (map (('v':) . show) [(1::Int)..]) origArgsTy))
+      let (fbody, _, throwsHsExcp) =
+            runSwiftCodeGen (fromHaskell (Proxy @($(pure orig_ty))) fcall) "foreign_haskell_call_result" (map (('v':) . show) [(1::Int)..])
 
       return $ unlines $
         [ -- let's just do it inline rather than -- "@ForeignImportHaskell"
@@ -388,3 +373,13 @@ isOptional _ = False
 
 unsafeMutableRawPointerType :: MoatType
 unsafeMutableRawPointerType = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
+
+-- | Drop `IO` from the result type.
+-- We need this because ToMoatType doesn't have an IO instance and we only care
+-- that on the swift side we get the right result type (without IO)
+dropResultIO :: TH.Type -> TH.Type
+dropResultIO (AppT (AppT ArrowT a) b) = AppT (AppT ArrowT a) (dropResultIO b)
+dropResultIO (AppT (ConT n) t)
+  | n == ''IO = t
+  | otherwise = AppT (ConT n) t
+dropResultIO t = t

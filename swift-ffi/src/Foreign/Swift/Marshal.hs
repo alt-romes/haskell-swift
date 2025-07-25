@@ -26,6 +26,8 @@ import Control.Exception
 import Data.ByteString.Unsafe (unsafePackCStringLen, unsafeUseAsCStringLen)
 import qualified Data.Monoid as Monoid
 import Control.Monad.Writer
+import Control.Monad.State.Strict
+import Control.Monad.RWS.Strict
 
 class ToMoatType a => ToSwift a where
   -- | The FFI return type for a foreign exported function returning @a@ 
@@ -42,7 +44,6 @@ class ToMoatType a => ToSwift a where
   -- inserted in the Swift foreign wrapper which reads a result from Haskell
   -- into the matching Swift type.
   fromHaskell :: Proxy a
-              -> String -- ^ Result name
               -> ([String] {-^ Args to add to the foreign call -} -> SwiftCodeGen String) -- ^ Continuation
               -> SwiftCodeGen String -- ^ Result is code to decode result plus the code returned by the continuation
 
@@ -60,7 +61,6 @@ class ToMoatType a => FromSwift a where
   -- inserted in the Swift foreign wrapper which encodes a result from Swift
   -- into the Haskell foreign exported function
   toHaskell :: Proxy a
-            -> String -- ^ Argument name
             -> ([String] {-^ Foreign call arguments added by this argument -} -> SwiftCodeGen String) -- ^ Continuation takes encoded arguments
             -> SwiftCodeGen String -- ^ Result is code to encode arguments plus the code returned by the continuation
 
@@ -68,8 +68,9 @@ class ToMoatType a => FromSwift a where
 -- * Producing Swift code that encodes/decodes values at boundary
 --------------------------------------------------------------------------------
 
-newtype SwiftCodeGen a = SwiftCodeGen { getSwiftCodeGen :: (a, Monoid.Any) }
-  deriving (Functor, Applicative, Monad, MonadWriter Monoid.Any) via Writer Monoid.Any
+newtype SwiftCodeGen a = SwiftCodeGen { runSwiftCodeGen :: String {-^ The name to which the result is bound in the call -}
+                                                        -> [String] -> (a, [String], Monoid.Any) }
+  deriving (Functor, Applicative, Monad, MonadWriter Monoid.Any, MonadState [String], MonadReader String) via RWS String Monoid.Any [String]
 
 -- | Get the variable name for the shared JSON encoder
 -- (One only gets produced if it is used in the code)
@@ -83,6 +84,15 @@ getDecoder = return "hs_dec" -- bit wasteful, but let's get this working first.
 -- | Marks the Swift function with @throws(HaskellException)@
 registerThrowsHsException :: SwiftCodeGen ()
 registerThrowsHsException = tell (Monoid.Any True)
+
+-- | Take the next variable from the list of Swift wrapper variables
+nextVar :: SwiftCodeGen String
+nextVar = do
+  get >>= \case
+    [] -> error "panic: Trying to get more arguments but none are available!"
+    v:vs -> do
+      put vs
+      return v
 
 --------------------------------------------------------------------------------
 -- * Deriving via via TH
@@ -180,7 +190,8 @@ instance (ToMoatType a, ToJSON a) => ToSwift (JSONMarshal a) where
         poke buffer maxBound
         poke sizeptr (-1)
 
-  fromHaskell _ _r{-result value is ignored as the result is read from passed buffers-} getCont = do
+  fromHaskell _ getCont = do
+    {-result is read from passed buffers-}
     decoder <- getDecoder
     let res_ptr  = "res_ptr"
     let size_ptr = "size_ptr"
@@ -233,7 +244,8 @@ instance (ToMoatType a, FromJSON a) => FromSwift (JSONMarshal a) where
   fromSwift k cstr clen =
     k (unsafePackCStringLen (cstr, clen) >>= throwDecodeStrict)
 
-  toHaskell _ v getCont = do
+  toHaskell _ getCont = do
+    v <- nextVar
     let v_data    = v ++ "_data"
     let v_datalen = v ++ "_datalen"
     let v_ptr     = v ++ "_ptr"
@@ -260,12 +272,13 @@ instance ToMoatType a => ToSwift (PtrMarshal a) where
     ptr <- newStablePtr a
     pure $ coerce ptr
 
-  fromHaskell _ r getCont = do
+  fromHaskell _ getCont = do
     -- For a StablePtr, simply return the result of the foreign call
+    ret_name <- ask
     cont <- getCont []
     return [__i|
       #{cont}
-      return #{r}!
+      return #{ret_name}!
     |]
 
 instance ToMoatType a => FromSwift (PtrMarshal a) where
@@ -276,7 +289,8 @@ instance ToMoatType a => FromSwift (PtrMarshal a) where
     ptr <- deRefStablePtr p
     pure $ coerce ptr
 
-  toHaskell _ v getCont = do
+  toHaskell _ getCont = do
+    v    <- nextVar
     cont <- getCont [v] -- StablePtr arguments are passed directly to the foreign call
     return cont
 
@@ -303,9 +317,9 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
           return x
 
   -- pass an exception ptr and make sure to check it before calling fromHaskell on the proper result
-  fromHaskell _ r getCont = do
+  fromHaskell _ getCont = do
     registerThrowsHsException
-    fromHaskell (Proxy @a) r $ \args -> do
+    fromHaskell (Proxy @a) $ \args -> do
       cont <- getCont $ ["except_ptr.baseAddress"] ++ args
       return [__i|
         try withUnsafeTemporaryAllocation(of: UnsafePointer<CChar>.self, capacity: 1) { except_ptr in
@@ -341,7 +355,8 @@ instance (ToMoatType b, ToSwift b) => ToSwift (IO b) where
   type FFIResult (IO b) = FFIResult b
   toSwift = toSwift . join
 
-  fromHaskell = error "todo: as below:"
+  -- IO on the swift side; nothing new happens
+  fromHaskell _ getCont = fromHaskell (Proxy @b) getCont
 
 instance (FromSwift a, ToSwift b) => ToSwift (a -> b) where
   type FFIResult (a -> b) = FFIArg a (FFIResult b)
@@ -353,10 +368,10 @@ instance (FromSwift a, ToSwift b) => ToSwift (a -> b) where
         a <- ioa
         return $ f a
 
-  fromHaskell _ _ _ = error "Still done in 'yieldFunction; we should never reach this'"
-  --   toHaskell (Proxy @b) _ _
-  --   fromHaskell (Proxy @a) _ _
-  --   _
+  fromHaskell _ getCont =
+    toHaskell (Proxy @a) $ \args_added_by_a ->
+      fromHaskell (Proxy @b) $ \args_added_by_b ->
+        getCont (args_added_by_a ++ args_added_by_b)
 
 -- Lists
 deriving via (JSONMarshal [a]) instance (ToMoatType a, ToJSON a) => ToSwift [a]

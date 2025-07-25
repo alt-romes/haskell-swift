@@ -101,7 +101,7 @@ foreignExportSwift fun_name = do
   wrapper_body <- [| toSwift (pure $(varE fun_name)) |]
   let fun = FunD wrapper_name ([Clause [] (NormalB wrapper_body) []])
 
-  gens <- genSwiftActionAndAnn (yieldFunction (origArgsTy, stripTyIO origResTy) (nameBase fun_name) wrapper_name_str) fun_name (dropResultIO origin_ty) [|| ExportSwiftFunction ||]
+  gens <- genSwiftActionAndAnn (yieldFunction origin_ty (nameBase fun_name) wrapper_name_str) fun_name [|| ExportSwiftFunction ||]
 
   return ([fsig, fun, fexp] ++ gens)
 
@@ -225,12 +225,3 @@ stripTyIO (ForallT x y c) = ForallT x y (stripTyIO c)
 stripTyIO (AppT (ConT n) t) | n == ''IO = t
 stripTyIO t = t
 
--- | Drop `IO` from the result type.
--- We need this because ToMoatType doesn't have an IO instance and we only care
--- that on the swift side we get the right result type (without IO)
-dropResultIO :: Type -> Type
-dropResultIO (AppT (AppT ArrowT a) b) = AppT (AppT ArrowT a) (dropResultIO b)
-dropResultIO (AppT (ConT n) t)
-  | n == ''IO = t
-  | otherwise = AppT (ConT n) t
-dropResultIO t = t
