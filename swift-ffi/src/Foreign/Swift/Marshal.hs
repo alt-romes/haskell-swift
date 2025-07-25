@@ -287,17 +287,17 @@ instance ToMoatType a => FromSwift (PtrMarshal a) where
 
 instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
   type FFIResult (CatchFFI IO a) =
-        Ptr (StablePtr SomeException) {-^ nullptr if no exception -} -> FFIResult a
+        Ptr CString {- empty string if no exception -} -> FFIResult a
 
-  toSwift :: IO (CatchFFI IO a) -> Ptr (StablePtr SomeException) -> FFIResult a
+  toSwift :: IO (CatchFFI IO a) -> Ptr CString -> FFIResult a
   toSwift io_io_a exceptptr =
     toSwift @a $ do
       CatchFFI io_a <- io_io_a
       r <- (Right <$> io_a) `catch` (\(e :: SomeException) -> pure (Left e))
       case r of
         Left e -> do
-          sptre <- newStablePtr e
-          poke exceptptr sptre
+          cstr <- newCString (displayException e)
+          poke exceptptr cstr
           throwIO (CatchExceptionsFFICaught e)
         Right x -> do
           poke exceptptr (unsafeCoerce# 0x0#)
@@ -309,11 +309,18 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
     fromHaskell (Proxy @a) r $ \args -> do
       cont <- getCont $ ["except_ptr.baseAddress"] ++ args
       return [__i|
-        try withUnsafeTemporaryAllocation(of: UnsafeMutableRawPointer.self, capacity: 1) { except_ptr in
+        try withUnsafeTemporaryAllocation(of: UnsafePointer<CChar>.self, capacity: 1) { except_ptr in
       #{indent 4 cont}
-          if let exception_result = except_ptr.baseAddress?.pointee {
-            // Exception result is a non-nil pointer, therefore it points to an exception
-            throw HaskellException.exception("\\(exception_result)")
+          if let exception_cstring = except_ptr.baseAddress?.pointee
+          {
+            let exception_string = String(cString: exception_cstring)
+            // String(cString: ...) copies the bytes, so free the Haskell string afterwards
+            // TODO: Free exception_cstring
+
+            if !exception_string.isEmpty {
+              // Exception result is a non-nil string, therefore an exception was thrown
+              throw HaskellException.exception(exception_string)
+            }
           }
         }
       |]
