@@ -309,7 +309,7 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
       r <- (Right <$> io_a) `catch` (\(e :: SomeException) -> pure (Left e))
       case r of
         Left e -> do
-          cstr <- newCString (displayException e)
+          cstr <- newCString (displayException e) -- allocates with stdlib malloc
           poke exceptptr cstr
           throwIO (CatchExceptionsFFICaught e)
         Right x -> do
@@ -330,7 +330,7 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
             {
               let exception_string = String(cString: exception_cstring)
               // String(cString: ...) copies the bytes, so free the Haskell string afterwards
-              // TODO: Free exception_cstring
+              free(exception_cstring as! UnsafeMutableRawPointer) // uses stdlib malloc's free, matching the allocation
 
               if !exception_string.isEmpty {
                 // Exception result is a non-nil string, therefore an exception was thrown
