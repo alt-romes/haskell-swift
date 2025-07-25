@@ -271,8 +271,8 @@ yieldFunction orig_ty orig_name wrapper_name = do
 
   outputCode [|
     do
-      let moatTy = toMoatType (Proxy @($(pure $ dropResultIO orig_ty)))
-          -- moatData = toMoatData (Proxy @($(stripTyIO prx))
+      let moatTy = toMoatType (Proxy @($(pure $ orig_ty)))
+          -- moatData = toMoatData (Proxy @($(prx))
           (argTys, retTy) = splitRetMoatTy ([], undefined) moatTy
           splitRetMoatTy (args, r) (Moat.App arg c) = splitRetMoatTy (arg:args, r) c
           splitRetMoatTy (args, _) ret = (reverse args, ret)
@@ -374,12 +374,3 @@ isOptional _ = False
 unsafeMutableRawPointerType :: MoatType
 unsafeMutableRawPointerType = Concrete { concreteName = "UnsafeMutableRawPointer", concreteTyVars = [] }
 
--- | Drop `IO` from the result type.
--- We need this because ToMoatType doesn't have an IO instance and we only care
--- that on the swift side we get the right result type (without IO)
-dropResultIO :: TH.Type -> TH.Type
-dropResultIO (AppT (AppT ArrowT a) b) = AppT (AppT ArrowT a) (dropResultIO b)
-dropResultIO (AppT (ConT n) t)
-  | n == ''IO = t
-  | otherwise = AppT (ConT n) t
-dropResultIO t = t
