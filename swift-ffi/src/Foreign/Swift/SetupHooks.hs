@@ -36,8 +36,8 @@ foreignSwiftSetupHooks libName = let xcfPath = buildDir </> libName <.> "xcframe
 setStubDir :: PreConfComponentInputs -> IO PreConfComponentOutputs
 setStubDir PreConfComponentInputs{..} = do
   let with_stub = emptyBuildInfo
-        -- { {-ghc--}options = PerCompilerFlavor ["-stubdir="++includeDir] []
-        -- }
+        { {-ghc--}options = PerCompilerFlavor ["-fplugin Foreign.Swift.Lib"] []
+        }
   return PreConfComponentOutputs
     { componentDiff = buildInfoComponentDiff (componentName component) with_stub }
 
