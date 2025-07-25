@@ -26,7 +26,6 @@ import Control.Exception
 import Data.ByteString.Unsafe (unsafePackCStringLen, unsafeUseAsCStringLen)
 import qualified Data.Monoid as Monoid
 import Control.Monad.Writer
-import GHC.Exts (unsafeCoerce#)
 
 class ToMoatType a => ToSwift a where
   -- | The FFI return type for a foreign exported function returning @a@ 
@@ -300,7 +299,7 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
           poke exceptptr cstr
           throwIO (CatchExceptionsFFICaught e)
         Right x -> do
-          poke exceptptr (unsafeCoerce# 0x0#)
+          poke exceptptr nullPtr
           return x
 
   -- pass an exception ptr and make sure to check it before calling fromHaskell on the proper result
