@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-orphans #-} -- ToMoatTy (IO a)
+{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DerivingVia #-}
@@ -25,6 +26,7 @@ import Control.Exception
 import Data.ByteString.Unsafe (unsafePackCStringLen, unsafeUseAsCStringLen)
 import qualified Data.Monoid as Monoid
 import Control.Monad.Writer
+import GHC.Exts (unsafeCoerce#)
 
 class ToMoatType a => ToSwift a where
   -- | The FFI return type for a foreign exported function returning @a@ 
@@ -297,7 +299,8 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
           sptre <- newStablePtr e
           poke exceptptr sptre
           throwIO (CatchExceptionsFFICaught e)
-        Right x ->
+        Right x -> do
+          poke exceptptr (unsafeCoerce# 0x0#)
           return x
 
   -- pass an exception ptr and make sure to check it before calling fromHaskell on the proper result
@@ -306,12 +309,11 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
     fromHaskell (Proxy @a) r $ \args -> do
       cont <- getCont $ ["except_ptr.baseAddress"] ++ args
       return [__i|
-        try withUnsafeTemporaryAllocation(of: UnsafeMutableRawBufferPointer.self, capacity: 1) { except_ptr in
+        try withUnsafeTemporaryAllocation(of: UnsafeMutableRawPointer.self, capacity: 1) { except_ptr in
       #{indent 4 cont}
           if let exception_result = except_ptr.baseAddress?.pointee {
-            if exception_result != nil {
-              throw HaskellException.exception("\\(except_ptr)")
-            }
+            // Exception result is a non-nil pointer, therefore it points to an exception
+            throw HaskellException.exception("\\(exception_result)")
           }
         }
       |]
