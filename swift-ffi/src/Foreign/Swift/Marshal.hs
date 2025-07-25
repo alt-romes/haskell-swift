@@ -319,24 +319,28 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
   -- pass an exception ptr and make sure to check it before calling fromHaskell on the proper result
   fromHaskell _ getCont = do
     registerThrowsHsException
-    fromHaskell (Proxy @a) $ \args -> do
-      cont <- getCont $ ["except_ptr.baseAddress"] ++ args
-      return [__i|
-        try withUnsafeTemporaryAllocation(of: UnsafePointer<CChar>.self, capacity: 1) { except_ptr in
-      #{indent 4 cont}
-          if let exception_cstring = except_ptr.baseAddress?.pointee
-          {
-            let exception_string = String(cString: exception_cstring)
-            // String(cString: ...) copies the bytes, so free the Haskell string afterwards
-            // TODO: Free exception_cstring
+    call_return_name <- ask
+    local (++ "_exception_cleared") $ -- modify the return name because we re-bind the result returned by the try
+      fromHaskell (Proxy @a) $ \args -> do
+        cont <- getCont $ ["except_ptr.baseAddress"] ++ args
+        return [__i|
+          let #{call_return_name ++ "_exception_cleared"} = try withUnsafeTemporaryAllocation(of: UnsafePointer<CChar>.self, capacity: 1) { except_ptr in
+        #{indent 4 cont}
+            if let exception_cstring = except_ptr.baseAddress?.pointee
+            {
+              let exception_string = String(cString: exception_cstring)
+              // String(cString: ...) copies the bytes, so free the Haskell string afterwards
+              // TODO: Free exception_cstring
 
-            if !exception_string.isEmpty {
-              // Exception result is a non-nil string, therefore an exception was thrown
-              throw HaskellException.exception(exception_string)
+              if !exception_string.isEmpty {
+                // Exception result is a non-nil string, therefore an exception was thrown
+                throw HaskellException.exception(exception_string)
+              }
             }
+
+            return #{call_return_name}
           }
-        }
-      |]
+        |]
 
 -- | When an exception is caught by 'CatchFFI, we write the 'Ptr' to
 -- the exception and then throw from the IO action a 'CatchExceptionsFFICaught'
