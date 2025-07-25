@@ -190,7 +190,7 @@ instance (ToMoatType a, ToJSON a) => ToSwift (JSONMarshal a) where
         poke buffer maxBound
         poke sizeptr (-1)
 
-  fromHaskell _ getCont = do
+  fromHaskell _ getCall = do
     {-result is read from passed buffers-}
     decoder <- getDecoder
     let res_ptr  = "res_ptr"
@@ -204,7 +204,7 @@ instance (ToMoatType a, ToJSON a) => ToSwift (JSONMarshal a) where
             throw HsFFIError.decodingFailed(String(decoding: new_data, as: UTF8.self), err)
           }
         |] :: String
-    cont <- getCont [res_ptr++".baseAddress", size_ptr++".baseAddress"]
+    cont <- getCall [res_ptr++".baseAddress", size_ptr++".baseAddress"]
     return [__i|
       // Allocate buffer for result and allocate a pointer to an int with the initial size of the buffer
       let buf_size = 1024000
@@ -244,13 +244,13 @@ instance (ToMoatType a, FromJSON a) => FromSwift (JSONMarshal a) where
   fromSwift k cstr clen =
     k (unsafePackCStringLen (cstr, clen) >>= throwDecodeStrict)
 
-  toHaskell _ getCont = do
+  toHaskell _ getCall = do
     v <- nextVar
     let v_data    = v ++ "_data"
     let v_datalen = v ++ "_datalen"
     let v_ptr     = v ++ "_ptr"
     enc <- getEncoder
-    cont <- getCont [v_ptr++".baseAddress", v_datalen]
+    cont <- getCall [v_ptr++".baseAddress", v_datalen]
     return [__i|
       var #{v_data} = try #{enc}.encode(#{v})
       let #{v_datalen} = Int64(#{v_data}.count)
@@ -272,10 +272,10 @@ instance ToMoatType a => ToSwift (PtrMarshal a) where
     ptr <- newStablePtr a
     pure $ coerce ptr
 
-  fromHaskell _ getCont = do
+  fromHaskell _ getCall = do
     -- For a StablePtr, simply return the result of the foreign call
     ret_name <- ask
-    cont <- getCont []
+    cont <- getCall []
     return [__i|
       #{cont}
       return #{ret_name}!
@@ -289,9 +289,9 @@ instance ToMoatType a => FromSwift (PtrMarshal a) where
     ptr <- deRefStablePtr p
     pure $ coerce ptr
 
-  toHaskell _ getCont = do
+  toHaskell _ getCall = do
     v    <- nextVar
-    cont <- getCont [v] -- StablePtr arguments are passed directly to the foreign call
+    cont <- getCall [v] -- StablePtr arguments are passed directly to the foreign call
     return cont
 
 --------------------------------------------------------------------------------
@@ -317,12 +317,12 @@ instance (ToMoatType a, ToSwift a) => ToSwift (CatchFFI IO a) where
           return x
 
   -- pass an exception ptr and make sure to check it before calling fromHaskell on the proper result
-  fromHaskell _ getCont = do
+  fromHaskell _ getCall = do
     registerThrowsHsException
     call_return_name <- ask
     local (++ "_exception_cleared") $ -- modify the return name because we re-bind the result returned by the try
       fromHaskell (Proxy @a) $ \args -> do
-        cont <- getCont $ ["except_ptr.baseAddress"] ++ args
+        cont <- getCall $ ["except_ptr.baseAddress"] ++ args
         return [__i|
           let #{call_return_name ++ "_exception_cleared"} = try withUnsafeTemporaryAllocation(of: UnsafePointer<CChar>.self, capacity: 1) { except_ptr in
         #{indent 4 cont}
@@ -378,10 +378,10 @@ instance (FromSwift a, ToSwift b) => ToSwift (a -> b) where
         a <- ioa
         return $ f a
 
-  fromHaskell _ getCont =
+  fromHaskell _ getCall =
     toHaskell (Proxy @a) $ \args_added_by_a ->
       fromHaskell (Proxy @b) $ \args_added_by_b ->
-        getCont (args_added_by_a ++ args_added_by_b)
+        getCall (args_added_by_a ++ args_added_by_b)
 
 -- Lists
 deriving via (JSONMarshal [a]) instance (ToMoatType a, ToJSON a) => ToSwift [a]
