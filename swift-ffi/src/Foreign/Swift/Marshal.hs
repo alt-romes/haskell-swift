@@ -351,12 +351,18 @@ newtype CatchExceptionsFFICaught = CatchExceptionsFFICaught SomeException
 -- ToSwift/FromSwift base instances
 --------------------------------------------------------------------------------
 
+-- | By default, a function returning an IO-wrapped value will by default use
+-- the 'CatchFFI IO' instance to catch all synchronous exceptions and re-throw
+-- them on the Swift side.
 instance (ToMoatType b, ToSwift b) => ToSwift (IO b) where
-  type FFIResult (IO b) = FFIResult b
-  toSwift = toSwift . join
+  type FFIResult (IO b) = FFIResult (CatchFFI IO b)
 
-  -- IO on the swift side; nothing new happens
-  fromHaskell _ getCont = fromHaskell (Proxy @b) getCont
+  toSwift = toSwift @(CatchFFI IO b) . fmap CatchFFI
+  fromHaskell _ = fromHaskell (Proxy @(CatchFFI IO b))
+
+  -- To implement IO without exception catching: (maybe we could also have a newtype wrapper for this)
+  -- toSwift = toSwift @b . join
+  -- fromHaskell _ = fromHaskell (Proxy @b)
 
 instance (FromSwift a, ToSwift b) => ToSwift (a -> b) where
   type FFIResult (a -> b) = FFIArg a (FFIResult b)

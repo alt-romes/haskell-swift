@@ -66,7 +66,7 @@ plugin = defaultPlugin
   , typeCheckResultAction = \_ -> typeCheckAct }
 
 typeCheckAct :: ModSummary -> TcGblEnv -> TcM TcGblEnv
-typeCheckAct ms g = return g
+typeCheckAct _ms g = return g
 
 yieldSwiftCode :: ModGuts -> CoreM ModGuts
 yieldSwiftCode g@ModGuts{..} = do
